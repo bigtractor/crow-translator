@@ -180,6 +180,9 @@ export function useDebouncer({
           consecutiveCount: 1,
           durationSec: 3, // Each slice is 3 seconds
           active: true,
+          rawLabel: result.rawLabel,
+          customTitle: result.customTitle,
+          customMeaning: result.customMeaning,
         };
 
         setActiveEvent(newEvent);

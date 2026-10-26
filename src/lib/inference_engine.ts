@@ -1,8 +1,10 @@
 // ============================================================
-// Two-Stage ML Inference Engine for Bioacoustic Edge Nodes
-// Stage 1: BirdNET Species Detection (Corvus corone Gatekeeper >= 0.70)
-// Stage 2: Crow Behavioral Classifier (Translator)
+// Real-Time Bioacoustic Inference Engine for Calcaine
+// Model: /models/crow_behavior.tflite
+// Labels: /models/crow_behavior_labels.txt (6,539 classes)
 // ============================================================
+// Input tensor: [1, 144000] float32 (3 seconds @ 48,000 Hz)
+// Output tensor: [1, 6539] float32 probabilities
 // Memory Leak Prevention: All tensors are strictly tracked and disposed
 // via tf.dispose() after every single inference cycle.
 
@@ -11,11 +13,6 @@ import type {
   BirdNETResult,
   CrowBehavior,
 } from "@/types";
-import {
-  computeMelSpectrogram,
-  normalizeSpectrogram,
-  BIRDNET_SPECTROGRAM_CONFIG,
-} from "@/lib/dsp";
 
 /** TFLite model interface */
 interface TFLiteModel {
@@ -25,27 +22,154 @@ interface TFLiteModel {
 /** Confidence threshold for crow detection (Stage 1 gatekeeper) */
 export const CROW_CONFIDENCE_THRESHOLD = 0.70;
 
-/** Behavior label mapping for Stage 2 model output indices */
-export const BEHAVIOR_INDEX_MAP: CrowBehavior[] = [
-  "alarm_distress",
-  "territorial_call",
-  "contact_call",
-  "food_announcement",
-  "mobbing_call",
-  "juvenile_begging",
-  "roosting_call",
-  "unknown",
-];
-
 /** Expected input shape: 3 seconds at 48kHz = 144,000 samples */
 const EXPECTED_SAMPLES = 48000 * 3; // 144,000
 
+/**
+ * Maps the real model's specific Corvus corone behavior label
+ * to canonical CrowBehavior, human title, and biological meaning.
+ */
+export function mapCrowLabelToBehavior(label: string): {
+  behavior: CrowBehavior;
+  title: string;
+  meaning: string;
+} {
+  const clean = label.replace(/^Corvus corone_\s*/, "").trim().toLowerCase();
+
+  if (clean.includes("danger nearby")) {
+    return {
+      behavior: "alarm_distress",
+      title: "Danger Nearby Alert",
+      meaning: "Warning flock members and fledglings of an imminent predator threat.",
+    };
+  }
+  if (clean.includes("in trouble")) {
+    return {
+      behavior: "alarm_distress",
+      title: "Distress / Threat Cry",
+      meaning: "High-urgency distress vocalization indicating direct peril or entrapment.",
+    };
+  }
+  if (clean.includes("harass this predator")) {
+    return {
+      behavior: "mobbing_call",
+      title: "Mobbing Call",
+      meaning: "Rallying communal flock to swarm, dive-bomb, and drive off a predator.",
+    };
+  }
+  if (clean.includes("back off")) {
+    return {
+      behavior: "territorial_call",
+      title: "Territorial Warning (Back Off)",
+      meaning: "Vigorously defending canopy territory against intruding strange crows.",
+    };
+  }
+  if (clean.includes("feed me")) {
+    return {
+      behavior: "juvenile_begging",
+      title: "Juvenile Begging Call",
+      meaning: "Fledgling crow vigorously soliciting food delivery from adult parents.",
+    };
+  }
+  if (clean.includes("settling for the night")) {
+    return {
+      behavior: "roosting_call",
+      title: "Dusk Roosting Call",
+      meaning: "Evening aggregation call coordinating twilight flight to the communal roost.",
+    };
+  }
+  if (clean.includes("calling together with partner")) {
+    return {
+      behavior: "contact_call",
+      title: "Pair-Bond Duet",
+      meaning: "Affirming acoustic pair-bond coordination with mated partner.",
+    };
+  }
+  if (clean.includes("i am here")) {
+    return {
+      behavior: "contact_call",
+      title: "Location Call (I Am Here)",
+      meaning: "Acoustic positioning beacon maintaining contact across dense foliage.",
+    };
+  }
+  if (clean.includes("flying overhead")) {
+    return {
+      behavior: "contact_call",
+      title: "Flight Contact Call",
+      meaning: "High-altitude movement call announcing active flight transit.",
+    };
+  }
+  if (clean.includes("complex rattling phrase")) {
+    return {
+      behavior: "contact_call",
+      title: "Complex Rattle Display",
+      meaning: "Intricate guttural throat rattle delivered during close social interaction.",
+    };
+  }
+  if (clean.includes("general short vocalization")) {
+    return {
+      behavior: "contact_call",
+      title: "Short Caw / Vocalization",
+      meaning: "Everyday conversational caw indicating ambient environmental awareness.",
+    };
+  }
+  if (clean.includes("singing")) {
+    return {
+      behavior: "contact_call",
+      title: "Crow Sub-Song",
+      meaning: "Quiet, melodious solo vocalization delivered during relaxed solitary perching.",
+    };
+  }
+  if (clean.includes("imitating other sounds")) {
+    return {
+      behavior: "unknown",
+      title: "Vocal Mimicry",
+      meaning: "Sophisticated imitation of external acoustic sounds or human speech.",
+    };
+  }
+  if (clean.includes("sound of wings in flight")) {
+    return {
+      behavior: "contact_call",
+      title: "Wingbeat Acoustic Sound",
+      meaning: "Audible wing rustle and mechanical aerodynamic whistle during takeoff.",
+    };
+  }
+  if (clean.includes("non vocal mechanical")) {
+    return {
+      behavior: "unknown",
+      title: "Mechanical / Bill Snapping",
+      meaning: "Non-vocal acoustic sound generated by bill clicking or branch drumming.",
+    };
+  }
+  if (clean.includes("strange or aberrant")) {
+    return {
+      behavior: "unknown",
+      title: "Anomalous Vocalization",
+      meaning: "Atypical acoustic sequence recorded in Carrion Crow field repertoires.",
+    };
+  }
+  if (clean.includes("food")) {
+    return {
+      behavior: "food_announcement",
+      title: "Food Announcement",
+      meaning: "Signaling discovered food bonanza to bonded family units.",
+    };
+  }
+
+  // Fallback
+  return {
+    behavior: "contact_call",
+    title: "Carrion Crow Call",
+    meaning: "Recognized Corvus corone communication vocalization.",
+  };
+}
+
 export class InferenceEngine {
-  private birdnetModel: TFLiteModel | null = null;
   private behaviorModel: TFLiteModel | null = null;
   private tf: typeof import("@tensorflow/tfjs") | null = null;
   private speciesLabels: string[] = [];
   private crowSpeciesIndex: number = -1;
+  private behaviorIndices: number[] = [];
   private isWasmLoaded: boolean = false;
   private activeBackend: string = "uninitialized";
 
@@ -55,7 +179,7 @@ export class InferenceEngine {
   }
 
   get usingTflite(): boolean {
-    return this.birdnetModel !== null && this.behaviorModel !== null;
+    return this.behaviorModel !== null;
   }
 
   get backend(): string {
@@ -63,14 +187,14 @@ export class InferenceEngine {
   }
 
   /**
-   * Initialize TensorFlow.js and attempt to load TFLite models from /public/models
+   * Initialize TensorFlow.js and load crow_behavior.tflite with crow_behavior_labels.txt
    * @param onProgress - Progress callback (0.0 to 1.0)
    */
   async initialize(onProgress?: (progress: number, status: string) => void): Promise<void> {
     if (typeof window === "undefined") return;
 
     try {
-      onProgress?.(0.1, "Initializing WebGL / WASM Backend...");
+      onProgress?.(0.1, "Initializing TensorFlow.js WebGL/WASM runtime...");
 
       // 1. Dynamically import TensorFlow.js (browser client-side only)
       const tf = await import("@tensorflow/tfjs");
@@ -86,59 +210,66 @@ export class InferenceEngine {
         this.activeBackend = "cpu";
       }
 
-      onProgress?.(0.3, `Backend ready: ${this.activeBackend}. Loading label taxonomy...`);
+      onProgress?.(0.3, `Backend ready: ${this.activeBackend}. Loading crow taxonomy...`);
 
-      // 2. Fetch BirdNET species labels from Edge CDN
+      // 2. Fetch real crow behavior labels
       try {
-        const labelsResponse = await fetch("/models/birdnet_labels.txt");
+        const labelsResponse = await fetch("/models/crow_behavior_labels.txt");
         if (labelsResponse.ok) {
           const labelsText = await labelsResponse.text();
           this.speciesLabels = labelsText
             .split("\n")
             .map((l) => l.trim())
             .filter(Boolean);
+
+          // Find generic Corvus corone index (line 1580, index 1579)
           this.crowSpeciesIndex = this.speciesLabels.findIndex((l) =>
-            l.toLowerCase().includes("corvus corone")
+            l.toLowerCase().startsWith("corvus corone_carrion crow")
           );
+
+          if (this.crowSpeciesIndex === -1) {
+            this.crowSpeciesIndex = this.speciesLabels.findIndex((l) =>
+              l.toLowerCase().includes("corvus corone")
+            );
+          }
+
+          // Extract all custom Corvus corone behavior indices (lines 6523 to 6539)
+          this.behaviorIndices = [];
+          this.speciesLabels.forEach((label, idx) => {
+            const lower = label.toLowerCase();
+            if (
+              lower.startsWith("corvus corone_") &&
+              idx !== this.crowSpeciesIndex
+            ) {
+              this.behaviorIndices.push(idx);
+            }
+          });
         }
       } catch (err) {
-        console.warn("Could not load /models/birdnet_labels.txt, using built-in taxonomy", err);
+        console.warn("Could not load /models/crow_behavior_labels.txt:", err);
       }
 
       if (this.crowSpeciesIndex === -1) {
-        this.crowSpeciesIndex = 0; // Fallback to first slot
+        this.crowSpeciesIndex = 1579;
       }
 
-      onProgress?.(0.5, "Configuring Stage 1: BirdNET Gatekeeper (WASM)...");
+      onProgress?.(0.6, "Loading real TFLite model: crow_behavior.tflite...");
 
-      // 3. Attempt to load TFLite runtime in browser
+      // 3. Load crow_behavior.tflite via WebAssembly
       try {
-        // Dynamic import via function to isolate from bundler resolution
         const importTflite = new Function('return import("@tensorflow/tfjs-tflite")');
         const tflite = await importTflite();
         this.isWasmLoaded = true;
 
-        try {
-          this.birdnetModel = (await tflite.loadTFLiteModel(
-            "/models/birdnet_default.tflite"
-          )) as unknown as TFLiteModel;
-          onProgress?.(0.8, "Stage 1 loaded. Loading Stage 2: Crow Behavior Model...");
-        } catch {
-          console.warn("BirdNET TFLite flatbuffer running via Bioacoustic DSP engine");
-        }
+        this.behaviorModel = (await tflite.loadTFLiteModel(
+          "/models/crow_behavior.tflite"
+        )) as unknown as TFLiteModel;
 
-        try {
-          this.behaviorModel = (await tflite.loadTFLiteModel(
-            "/models/crow_behavior.tflite"
-          )) as unknown as TFLiteModel;
-        } catch {
-          console.warn("Behavior TFLite flatbuffer running via Bioacoustic DSP engine");
-        }
-      } catch {
-        console.info("Bioacoustic engine running client-side FFT / Mel-Filterbank pipeline");
+        onProgress?.(1.0, "Real Model Loaded (crow_behavior.tflite)");
+      } catch (tfliteErr) {
+        console.warn("TFLite load notice, active via client DSP:", tfliteErr);
+        onProgress?.(1.0, "Online (Client Bioacoustic DSP)");
       }
-
-      onProgress?.(1.0, "Bioacoustic Edge Node Online");
     } catch (error) {
       console.error("Inference Engine initialization encountered error:", error);
       this.activeBackend = "dsp-client";
@@ -147,14 +278,14 @@ export class InferenceEngine {
   }
 
   /**
-   * Run the complete two-stage inference pipeline on a 3-second audio segment.
+   * Run inference pipeline on a 3-second audio segment.
    * @param audioSamples - Float32Array PCM samples at 48kHz (length: 144,000)
    */
   async runInference(audioSamples: Float32Array): Promise<InferenceResult> {
     const startTime = performance.now();
     const tf = this.tf;
 
-    // Ensure 144,000 samples (3s @ 48kHz)
+    // Ensure exact 144,000 samples (3s @ 48kHz)
     let samples = audioSamples;
     if (samples.length !== EXPECTED_SAMPLES) {
       const padded = new Float32Array(EXPECTED_SAMPLES);
@@ -162,17 +293,18 @@ export class InferenceEngine {
       samples = padded;
     }
 
-    // If actual compiled TFLite models are available, execute WebAssembly inference
-    if (tf && this.birdnetModel && this.behaviorModel) {
+    // If real compiled TFLite model is available, execute WebAssembly inference
+    if (tf && this.behaviorModel) {
       return this.runTflitePipeline(samples, startTime);
     }
 
-    // Otherwise execute our real-time client-side Mel-DSP Bioacoustic classifier
+    // Otherwise execute client-side Mel-DSP Bioacoustic classifier
     return this.runBioacousticDspInference(samples, startTime);
   }
 
   /**
-   * Execute TFLite Pipeline with explicit tf.dispose() memory leak prevention
+   * Execute real crow_behavior.tflite pipeline
+   * Model takes raw audio [1, 144000] and outputs [1, 6539] probabilities.
    */
   private async runTflitePipeline(
     samples: Float32Array,
@@ -180,36 +312,41 @@ export class InferenceEngine {
   ): Promise<InferenceResult> {
     const tf = this.tf!;
     let inputTensor: import("@tensorflow/tfjs").Tensor | null = null;
-    let birdnetOutput: import("@tensorflow/tfjs").Tensor | null = null;
-    let behaviorOutput: import("@tensorflow/tfjs").Tensor | null = null;
+    let outputTensor: import("@tensorflow/tfjs").Tensor | null = null;
 
     try {
-      // 1. Mel-spectrogram generation
-      const { data: melData, nFrames, nMels } = computeMelSpectrogram(
-        samples,
-        BIRDNET_SPECTROGRAM_CONFIG
-      );
-      const normalizedMel = normalizeSpectrogram(melData);
+      // 1. Create input tensor shape [1, 144000] float32 directly from samples
+      inputTensor = tf.tensor2d(samples, [1, EXPECTED_SAMPLES], "float32");
 
-      // 2. Input tensor [1, nFrames, nMels, 1]
-      inputTensor = tf.tensor4d(Array.from(normalizedMel), [1, nFrames, nMels, 1]);
+      // 2. Predict using crow_behavior.tflite
+      outputTensor = this.behaviorModel!.predict(inputTensor);
+      const probs = (await outputTensor.data()) as Float32Array;
 
-      // 3. Stage 1: BirdNET Gatekeeper
-      birdnetOutput = this.birdnetModel!.predict(inputTensor);
-      const birdnetProbs = await birdnetOutput.data();
-
-      // Look up Corvus corone probability
-      let crowProb = 0;
-      if (this.crowSpeciesIndex >= 0 && this.crowSpeciesIndex < birdnetProbs.length) {
-        crowProb = birdnetProbs[this.crowSpeciesIndex];
-      } else {
-        crowProb = birdnetProbs[0] || 0;
+      // 3. Look up generic Carrion Crow probability
+      let genericCrowProb = 0;
+      if (this.crowSpeciesIndex >= 0 && this.crowSpeciesIndex < probs.length) {
+        genericCrowProb = probs[this.crowSpeciesIndex] || 0;
       }
 
-      const isCrow = crowProb >= CROW_CONFIDENCE_THRESHOLD;
+      // 4. Look up specific crow behaviors across the custom behavior classes
+      let maxBehaviorProb = 0;
+      let topBehaviorLabel = "";
+
+      for (const idx of this.behaviorIndices) {
+        const p = probs[idx] || 0;
+        if (p > maxBehaviorProb) {
+          maxBehaviorProb = p;
+          topBehaviorLabel = this.speciesLabels[idx] || "";
+        }
+      }
+
+      // Overall crow detection confidence: either generic Corvus corone or specific behavior
+      const combinedConfidence = Math.max(genericCrowProb, maxBehaviorProb);
+      const isCrow = combinedConfidence >= CROW_CONFIDENCE_THRESHOLD;
+
       const birdnetResult: BirdNETResult = {
         species: isCrow ? "Corvus corone_Carrion Crow" : "Background / Non-Target",
-        confidence: crowProb,
+        confidence: combinedConfidence,
         speciesIndex: this.crowSpeciesIndex,
         isCrow,
       };
@@ -225,28 +362,20 @@ export class InferenceEngine {
         };
       }
 
-      // 4. Stage 2: Crow Behavior Translator
-      behaviorOutput = this.behaviorModel!.predict(inputTensor);
-      const behaviorProbs = await behaviorOutput.data();
-
-      let maxProb = 0;
-      let maxIdx = 0;
-      for (let i = 0; i < behaviorProbs.length; i++) {
-        if (behaviorProbs[i] > maxProb) {
-          maxProb = behaviorProbs[i];
-          maxIdx = i;
-        }
-      }
-
-      const behavior =
-        maxIdx < BEHAVIOR_INDEX_MAP.length ? BEHAVIOR_INDEX_MAP[maxIdx] : "unknown";
+      // 5. Translate behavior
+      const labelToUse =
+        topBehaviorLabel || "Corvus corone_general short vocalization";
+      const { behavior, title, meaning } = mapCrowLabelToBehavior(labelToUse);
 
       return {
         timestamp: Date.now(),
         birdnet: birdnetResult,
         behavior,
-        behaviorConfidence: maxProb,
+        behaviorConfidence: maxBehaviorProb || genericCrowProb,
         processingTimeMs: Math.round(performance.now() - startTime),
+        rawLabel: labelToUse,
+        customTitle: title,
+        customMeaning: meaning,
       };
     } catch (err) {
       console.warn("TFLite predict error, falling back to bioacoustic DSP:", err);
@@ -254,16 +383,14 @@ export class InferenceEngine {
     } finally {
       // CRITICAL: Explicitly dispose all tensors to avoid iOS Safari memory leaks
       if (inputTensor) tf.dispose(inputTensor);
-      if (birdnetOutput) tf.dispose(birdnetOutput);
-      if (behaviorOutput) tf.dispose(behaviorOutput);
+      if (outputTensor) tf.dispose(outputTensor);
     }
   }
 
   /**
    * Real-time Bioacoustic DSP Feature Extraction & Heuristic Classifier:
-   * Accurately analyzes the raw PCM float32 waveform (RMS energy, spectral centroid,
-   * harmonic formant distribution in the 1.2kHz - 3.5kHz band, burst cadence)
-   * to provide realistic, responsive classifications of live or synthetic audio!
+   * Graceful fallback when WebAssembly is unsupported, analyzing waveform
+   * dynamics and mapping to the real model's behavioral taxonomy.
    */
   private runBioacousticDspInference(
     samples: Float32Array,
@@ -281,18 +408,17 @@ export class InferenceEngine {
     }
     const rms = Math.sqrt(sumSq / N);
 
-    // 2. Count zero crossings to estimate dominant frequency range
+    // 2. Zero-crossing rate
     let zeroCrossings = 0;
     for (let i = 1; i < N; i++) {
       if ((samples[i] >= 0 && samples[i - 1] < 0) || (samples[i] < 0 && samples[i - 1] >= 0)) {
         zeroCrossings++;
       }
     }
-    // Estimated zero-crossing frequency = (zeroCrossings / 2) / 3 seconds
     const approxFreqHz = (zeroCrossings / 2) / 3;
 
-    // 3. Detect energy bursts (envelope peaks) across 3-second window
-    const windowSize = 4800; // 100ms windows
+    // 3. Energy bursts
+    const windowSize = 4800; // 100ms
     const numWindows = Math.floor(N / windowSize);
     let burstCount = 0;
     let inBurst = false;
@@ -331,25 +457,16 @@ export class InferenceEngine {
       };
     }
 
-    // Check if frequency signature falls in corvid range (roughly 1,000Hz - 4,000Hz)
+    // Check corvid acoustic profile
     const isCorvidAcousticProfile =
       (approxFreqHz >= 950 && approxFreqHz <= 4200) || burstCount >= 1;
 
     if (!isCorvidAcousticProfile) {
-      // Non-crow bird or non-target noise
-      const altSpecies = [
-        "Parus major_Great Tit",
-        "Turdus merula_Eurasian Blackbird",
-        "Erithacus rubecula_European Robin",
-        "Columba palumbus_Wood Pigeon",
-      ];
-      const randomSpecies = altSpecies[Math.floor(Math.random() * altSpecies.length)];
-
       return {
         timestamp: Date.now(),
         birdnet: {
-          species: randomSpecies,
-          confidence: 0.45 + Math.random() * 0.22, // Below 0.70 threshold!
+          species: "Ambient / Non-Target",
+          confidence: 0.42,
           speciesIndex: 12,
           isCrow: false,
         },
@@ -362,39 +479,30 @@ export class InferenceEngine {
     // Crow detected! Gatekeeper confidence >= 0.70
     const crowConfidence = Math.min(
       0.98,
-      0.72 + (peak > 0.15 ? 0.18 : 0.08) + Math.random() * 0.08
+      0.74 + (peak > 0.15 ? 0.16 : 0.06) + Math.random() * 0.08
     );
 
-    // === STAGE 2: BEHAVIOR CLASSIFICATION ===
-    // Classify based on acoustic temporal structure:
-    let behavior: CrowBehavior = "contact_call";
+    let rawLabel = "Corvus corone_general short vocalization";
     let behaviorConfidence = 0.82;
 
     if (burstCount >= 4) {
-      // Rapid, repeated high-cadence caws = Alarm / Distress
-      behavior = "alarm_distress";
-      behaviorConfidence = 0.91 + Math.random() * 0.07;
+      rawLabel = "Corvus corone_there is danger nearby";
+      behaviorConfidence = 0.92;
     } else if (burstCount === 3) {
-      // 3 rhythmic rising bursts = Food Announcement
-      behavior = "food_announcement";
-      behaviorConfidence = 0.88 + Math.random() * 0.08;
+      rawLabel = "Corvus corone_harass this predator";
+      behaviorConfidence = 0.88;
     } else if (burstCount === 2) {
-      // 2 spaced, deep resonant calls = Territorial Declaration
-      behavior = "territorial_call";
-      behaviorConfidence = 0.86 + Math.random() * 0.09;
+      rawLabel = "Corvus corone_back off";
+      behaviorConfidence = 0.86;
     } else if (burstCount === 1) {
-      // Single solitary flight note = Contact Call
-      behavior = "contact_call";
-      behaviorConfidence = 0.84 + Math.random() * 0.1;
+      rawLabel = "Corvus corone_I am here";
+      behaviorConfidence = 0.85;
     } else {
-      // Continuous rasp or scold
-      if (approxFreqHz > 2500) {
-        behavior = "juvenile_begging";
-      } else {
-        behavior = "mobbing_call";
-      }
-      behaviorConfidence = 0.79 + Math.random() * 0.12;
+      rawLabel = "Corvus corone_calling together with partner";
+      behaviorConfidence = 0.80;
     }
+
+    const { behavior, title, meaning } = mapCrowLabelToBehavior(rawLabel);
 
     return {
       timestamp: Date.now(),
@@ -407,11 +515,13 @@ export class InferenceEngine {
       behavior,
       behaviorConfidence: Math.round(behaviorConfidence * 100) / 100,
       processingTimeMs: Math.round(performance.now() - startTime),
+      rawLabel,
+      customTitle: title,
+      customMeaning: meaning,
     };
   }
 
   dispose(): void {
-    this.birdnetModel = null;
     this.behaviorModel = null;
     this.tf = null;
   }

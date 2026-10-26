@@ -185,6 +185,12 @@ export interface InferenceResult {
   behaviorConfidence: number | null;
   /** Processing time in ms */
   processingTimeMs: number;
+  /** Real model raw label name (e.g. Corvus corone_there is danger nearby) */
+  rawLabel?: string;
+  /** Custom human title from real model */
+  customTitle?: string;
+  /** Custom human biological meaning */
+  customMeaning?: string;
 }
 
 /** A debounced event in the live feed */
@@ -205,6 +211,12 @@ export interface TranslationEvent {
   durationSec: number;
   /** Whether the event is still active */
   active: boolean;
+  /** Real model raw label name (e.g. Corvus corone_there is danger nearby) */
+  rawLabel?: string;
+  /** Custom human title from real model */
+  customTitle?: string;
+  /** Custom human biological meaning */
+  customMeaning?: string;
 }
 
 /** Application state */

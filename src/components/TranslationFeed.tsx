@@ -152,7 +152,8 @@ export function TranslationFeed({
               <div className="flex-1 min-w-0">
                 <div className="flex items-baseline justify-between gap-2">
                   <h3 className="text-base sm:text-lg font-bold text-white tracking-tight truncate">
-                    {BEHAVIOR_TITLES[activeEvent.behavior] ||
+                    {activeEvent.customTitle ||
+                      BEHAVIOR_TITLES[activeEvent.behavior] ||
                       activeEvent.behavior}
                   </h3>
                   <span className="text-xs text-emerald-300 font-semibold shrink-0">
@@ -161,7 +162,8 @@ export function TranslationFeed({
                 </div>
 
                 <p className="text-xs sm:text-sm text-zinc-300 mt-1 leading-relaxed">
-                  {BEHAVIOR_MEANINGS[activeEvent.behavior] ||
+                  {activeEvent.customMeaning ||
+                    BEHAVIOR_MEANINGS[activeEvent.behavior] ||
                     "Recognized Carrion Crow vocalization sequence."}
                 </p>
               </div>
@@ -193,7 +195,9 @@ export function TranslationFeed({
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between gap-2">
                         <h4 className="text-sm sm:text-base font-semibold text-white tracking-tight truncate">
-                          {BEHAVIOR_TITLES[event.behavior] || event.behavior}
+                          {event.customTitle ||
+                            BEHAVIOR_TITLES[event.behavior] ||
+                            event.behavior}
                         </h4>
                         <div className="flex items-center gap-1.5 text-[11px] text-zinc-400 shrink-0">
                           <Clock className="w-3 h-3 text-zinc-400" />
@@ -202,7 +206,9 @@ export function TranslationFeed({
                       </div>
 
                       <p className="text-xs text-zinc-400 mt-1 leading-relaxed">
-                        {BEHAVIOR_MEANINGS[event.behavior]}
+                        {event.customMeaning ||
+                          BEHAVIOR_MEANINGS[event.behavior] ||
+                          "Recognized Carrion Crow communication sound."}
                       </p>
 
                       <div className="mt-2.5 flex items-center gap-2">
