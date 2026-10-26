@@ -2,7 +2,7 @@
 // ============================================================
 // CrowTrans inference worker
 // ============================================================
-// Runs crow_behavior.tflite off the main thread.
+// Runs crowtrans_v1b.tflite off the main thread.
 //
 // Why a worker: TFLiteModel.predict() is fully synchronous and takes ~300 ms
 // per 3-second window on a desktop (seconds on a phone). On the main thread
@@ -13,23 +13,25 @@
 // The CPU backend is used deliberately: TFLite runs on WASM regardless, so a
 // WebGL input tensor only added a GPU upload and readback on every window.
 
-import type { InferenceResult, BirdNETResult } from "@/types";
+import type { InferenceResult } from "@/types";
 import {
-  CARRION_CROW_THRESHOLD,
-  FALLBACK_CROW_INDEX,
-  findBehaviorIndices,
-  findGateSpecies,
+  LABELS_URL,
+  MODEL_URL,
+  CROW_PRESENCE_THRESHOLD,
+  decide,
   flatSigmoid,
-  evaluateGate,
-  mapCrowLabelToBehavior,
-  type GateEntry,
+  mapClassToBehavior,
 } from "../lib/crow_labels";
 
 /** 3 seconds at 48 kHz */
 const EXPECTED_SAMPLES = 48000 * 3;
 
-/** More saturated classes than this means the model returned garbage. */
-const SATURATION_LIMIT = 25;
+/**
+ * The very first run after load can return garbage in which most classes sit
+ * near 1.0. Seven real classes are never that unanimous, so discard it.
+ */
+const SATURATED_P = 0.99;
+const SATURATED_COUNT = 4;
 
 interface TFLiteModel {
   predict(inputs: import("@tensorflow/tfjs-core").Tensor): import("@tensorflow/tfjs-core").Tensor;
@@ -42,7 +44,7 @@ export type WorkerRequest =
 export type WorkerResponse =
   | { type: "debug"; message: string }
   | { type: "progress"; progress: number; status: string }
-  | { type: "ready"; backend: string; labelCount: number; gateLabels: string[] }
+  | { type: "ready"; backend: string; classes: string[] }
   | { type: "init-error"; message: string }
   | { type: "result"; id: number; result: InferenceResult }
   | { type: "infer-error"; id: number; message: string };
@@ -50,10 +52,6 @@ export type WorkerResponse =
 let tf: typeof import("@tensorflow/tfjs-core") | null = null;
 let model: TFLiteModel | null = null;
 let labels: string[] = [];
-let gateSpecies: GateEntry[] = [];
-let behaviorIndices: number[] = [];
-/** Index of the target species, Corvus corone. */
-let crowIndex = FALLBACK_CROW_INDEX;
 let initPromise: Promise<void> | null = null;
 
 function post(msg: WorkerResponse) {
@@ -66,26 +64,13 @@ function debug(message: string) {
 }
 
 async function loadLabels() {
-  const res = await fetch("/models/crow_behavior_labels.txt");
+  const res = await fetch(LABELS_URL);
   if (!res.ok) throw new Error(`labels HTTP ${res.status}`);
   labels = (await res.text())
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
-
-  gateSpecies = findGateSpecies(labels);
-  behaviorIndices = findBehaviorIndices(labels);
-
-  if (gateSpecies.length === 0) {
-    gateSpecies = [
-      {
-        index: FALLBACK_CROW_INDEX,
-        threshold: CARRION_CROW_THRESHOLD,
-        label: "Corvus corone_Carrion Crow",
-      },
-    ];
-  }
-  crowIndex = gateSpecies[0].index;
+  if (labels.length === 0) throw new Error("labels file is empty");
 }
 
 async function init() {
@@ -97,10 +82,10 @@ async function init() {
   await core.setBackend("cpu");
   await core.ready();
 
-  post({ type: "progress", progress: 0.3, status: "Loading crow taxonomy…" });
+  post({ type: "progress", progress: 0.3, status: "Loading call classes…" });
   await loadLabels();
 
-  post({ type: "progress", progress: 0.6, status: "Loading crow_behavior.tflite…" });
+  post({ type: "progress", progress: 0.6, status: "Loading CrowTrans model…" });
 
   // The package's ESM entry imports a file it does not ship in dist/, so the
   // self-contained UMD build is used instead.
@@ -115,8 +100,7 @@ async function init() {
   // tflite_web_api_cc_simd_threaded.wasm. That multi-threaded build proxies
   // work to the browser's main thread, so the synchronous predict() call below
   // never returns when the module lives inside a Web Worker: predict() is
-  // entered and the worker deadlocks. (Verified: the worker logged "input
-  // tensor created" and then nothing.) Detection is based on WASM engine
+  // entered and the worker deadlocks. Detection is based on WASM engine
   // support, not on cross-origin isolation, so dropping COOP/COEP does not
   // change it.
   //
@@ -131,26 +115,20 @@ async function init() {
     console.warn("[worker] could not override WASM features:", err);
   }
 
-  model = (await tflite.loadTFLiteModel("/models/crow_behavior.tflite", {
+  model = (await tflite.loadTFLiteModel(MODEL_URL, {
     numThreads: 1,
   })) as unknown as TFLiteModel;
 
-  debug(
-    "runtime fetched: " +
-      performance
-        .getEntriesByType("resource")
-        .map((e) => e.name)
-        .filter((n) => n.includes("tflite_web_api"))
-        .map((n) => n.split("/").pop())
-        .join(", ")
-  );
+  // Warm-up. The first predict() after load returns a zero-filled tensor (every
+  // logit exactly 0, i.e. 50% for all classes). Burn it on silence now so the
+  // first real window is valid.
+  const warmIn = core.zeros([1, EXPECTED_SAMPLES], "float32");
+  const warmOut = model.predict(warmIn);
+  warmOut.dataSync();
+  core.dispose(warmIn);
+  core.dispose(warmOut);
 
-  post({
-    type: "ready",
-    backend: core.getBackend(),
-    labelCount: labels.length,
-    gateLabels: gateSpecies.map((g) => `${g.label} @ ${Math.round(g.threshold * 100)}%`),
-  });
+  post({ type: "ready", backend: core.getBackend(), classes: labels });
 }
 
 function runInference(samples: Float32Array): InferenceResult {
@@ -173,113 +151,79 @@ function runInference(samples: Float32Array): InferenceResult {
     // holds the data in memory already.
     const logits = outputTensor.dataSync() as Float32Array;
 
-    if (labels.length > 0 && logits.length !== labels.length) {
-      console.warn(
-        `[worker] output length ${logits.length} != labels ${labels.length}; indices may be misaligned`
+    if (logits.length !== labels.length) {
+      throw new Error(
+        `model returned ${logits.length} outputs but ${labels.length} class names are loaded`
       );
     }
 
-    // Guard against a saturated / invalid output (seen on the very first run
-    // after load): a real window never has dozens of species above 0.99.
+    // The graph ends in raw logits; convert exactly as BirdNET-Analyzer does.
+    const probs = new Float32Array(logits.length);
     let saturated = 0;
-    for (let i = 0; i < logits.length && saturated <= SATURATION_LIMIT; i++) {
-      if (logits[i] > 5) saturated++;
+    let valid = true;
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (let i = 0; i < logits.length; i++) {
+      if (!Number.isFinite(logits[i])) valid = false;
+      probs[i] = flatSigmoid(logits[i]);
+      if (probs[i] > SATURATED_P) saturated++;
+      lo = Math.min(lo, logits[i]);
+      hi = Math.max(hi, logits[i]);
     }
-    if (saturated > SATURATION_LIMIT) {
-      console.warn(`[worker] discarding invalid frame: ${saturated}+ classes saturated`);
+    // Seven different classes never produce one identical value; that is the
+    // zero-filled output of an uninitialised run.
+    const degenerate = hi - lo < 1e-6;
+    if (!valid || degenerate || saturated >= SATURATED_COUNT) {
+      console.warn(
+        "[worker] discarding invalid frame; raw logits:",
+        Array.from(logits).map((v) => +v.toFixed(3))
+      );
       return {
         timestamp: Date.now(),
-        birdnet: {
-          species: "Invalid frame (model output saturated)",
-          confidence: 0,
-          speciesIndex: crowIndex,
-          isCrow: false,
-        },
+        detection: { isCrow: false, score: 0 },
         behavior: null,
         behaviorConfidence: null,
         processingTimeMs: Math.round(performance.now() - startTime),
       };
     }
 
-    // ---------------- STAGE 1: species gate (base BirdNET classes only) -----------
-    // Per-species thresholds; see evaluateGate in lib/crow_labels.
-    const gate = evaluateGate(logits, gateSpecies, crowIndex);
-    const isCrow = gate.isCrow;
-    const stage1Index = gate.index;
-    const stage1Score = gate.score;
-
-    // Top base-model species overall, for diagnostics.
-    let topBaseIdx = -1;
-    let topBaseLogit = -Infinity;
-    const baseCount = logits.length - behaviorIndices.length;
-    for (let i = 0; i < baseCount; i++) {
-      if (logits[i] > topBaseLogit) {
-        topBaseLogit = logits[i];
-        topBaseIdx = i;
-      }
-    }
+    const d = decide(probs, labels);
+    const behaviorTop = d.ranking;
 
     console.log(
-      `Stage 1: ${labels[stage1Index] ?? stage1Index} ${stage1Score.toFixed(3)} -> ` +
-        `${isCrow ? "PASS" : "DROP"} | gate: ` +
-        gateSpecies
-          .map(
-            (g) =>
-              `${(labels[g.index] ?? `#${g.index}`).split("_")[0]} ` +
-              `${flatSigmoid(logits[g.index] ?? -15).toFixed(3)}/${g.threshold.toFixed(2)}`
-          )
-          .join(", ") +
-        (topBaseIdx >= 0
-          ? ` | top base species: ${labels[topBaseIdx] ?? topBaseIdx} (${flatSigmoid(topBaseLogit).toFixed(3)})`
-          : "")
+      `CrowTrans: ${d.top?.label ?? "-"} ${(d.top?.p ?? 0).toFixed(3)} ` +
+        `(bar ${CROW_PRESENCE_THRESHOLD}) -> ${d.isCrow ? "CROW" : "none"} | ` +
+        d.ranking
+          .slice(0, 4)
+          .map((r) => `${r.label} ${r.p.toFixed(3)}`)
+          .join(", ")
     );
 
-    const birdnet: BirdNETResult = {
-      species: isCrow ? labels[stage1Index] ?? "Corvus corone_Carrion Crow" : "Background / Non-Target",
-      confidence: stage1Score,
-      speciesIndex: stage1Index,
-      isCrow,
-      topSpecies: topBaseIdx >= 0 ? labels[topBaseIdx] : undefined,
-      topSpeciesConfidence: topBaseIdx >= 0 ? flatSigmoid(topBaseLogit) : undefined,
-    };
+    const detection = { isCrow: d.isCrow, score: d.top?.p ?? 0 };
 
-    // Gatekeeper: below threshold -> drop the frame, never run Stage 2.
-    if (!isCrow) {
+    // Below the bar: no crow call, so no translation.
+    if (!d.isCrow || !d.top) {
       return {
         timestamp: Date.now(),
-        birdnet,
+        detection,
         behavior: null,
         behaviorConfidence: null,
         processingTimeMs: Math.round(performance.now() - startTime),
+        behaviorTop,
       };
     }
 
-    // ---------------- STAGE 2: behavior (custom appended classes only) ------------
-    let maxBehaviorProb = 0;
-    let topBehaviorLabel = "";
-    for (const idx of behaviorIndices) {
-      if (idx < 0 || idx >= logits.length) continue;
-      const p = flatSigmoid(logits[idx]);
-      if (p > maxBehaviorProb) {
-        maxBehaviorProb = p;
-        topBehaviorLabel = labels[idx] || "";
-      }
-    }
-
-    const labelToUse = topBehaviorLabel || "Corvus corone_general short vocalization";
-    const { behavior, title, meaning } = mapCrowLabelToBehavior(labelToUse);
-
-    console.log(`Stage 2 behavior: ${labelToUse} (${maxBehaviorProb.toFixed(3)}) -> ${title}`);
-
+    const { behavior, title, meaning } = mapClassToBehavior(d.top.label);
     return {
       timestamp: Date.now(),
-      birdnet,
+      detection,
       behavior,
-      behaviorConfidence: maxBehaviorProb,
+      behaviorConfidence: d.top.p,
       processingTimeMs: Math.round(performance.now() - startTime),
-      rawLabel: labelToUse,
+      rawLabel: d.top.label,
       customTitle: title,
       customMeaning: meaning,
+      behaviorTop,
     };
   } finally {
     core.dispose(inputTensor);

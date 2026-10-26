@@ -2,7 +2,7 @@
 
 import React from "react";
 import type { InferenceResult } from "@/types";
-import { CARRION_CROW_THRESHOLD } from "@/lib/inference_engine";
+import { CROW_PRESENCE_THRESHOLD, mapClassToBehavior } from "@/lib/crow_labels";
 
 interface CurrentFrameProps {
   frame: InferenceResult | null;
@@ -14,21 +14,15 @@ function pct(v: number | null | undefined): string {
   return `${Math.round(v * 100)}%`;
 }
 
-function shortSpecies(label?: string): string {
-  if (!label) return "—";
-  const i = label.indexOf("_");
-  return i >= 0 ? label.slice(i + 1) : label;
-}
-
 /**
- * The most recent 3-second window: Stage 1 species gate and, if it passed,
- * the Stage 2 behaviour. Kept factual and quiet.
+ * The most recent 3-second window: whether a crow call was heard and, if so,
+ * what it means. Kept factual and quiet.
  */
 export function CurrentFrame({ frame, listening }: CurrentFrameProps) {
-  const gate = frame?.birdnet.confidence ?? 0;
-  const passed = !!frame?.birdnet.isCrow;
-  // The bar shown is the target species' bar; see GATE_SPECIES.
-  const threshold = Math.round(CARRION_CROW_THRESHOLD * 100);
+  const score = frame?.detection.score ?? 0;
+  const passed = !!frame?.detection.isCrow;
+  const bar = Math.round(CROW_PRESENCE_THRESHOLD * 100);
+  const top3 = frame?.behaviorTop?.slice(0, 3) ?? [];
 
   return (
     <section className="glass p-5 sm:p-6" aria-labelledby="frame-heading">
@@ -44,33 +38,33 @@ export function CurrentFrame({ frame, listening }: CurrentFrameProps) {
       <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-4">
         <div className="col-span-2">
           <div className="flex items-baseline justify-between">
-            <dt className="text-[12px] text-[var(--text-2)]">Crow likelihood (gate ≥ {threshold}%)</dt>
-            <dd className="mono text-[13px]">{frame ? pct(gate) : "—"}</dd>
+            <dt className="text-[12px] text-[var(--text-2)]">Crow-call score (needs ≥ {bar}%)</dt>
+            <dd className="mono text-[13px]">{frame ? pct(score) : "—"}</dd>
           </div>
           <div className={`meter mt-2 ${passed ? "ok" : ""}`} aria-hidden="true">
-            <span style={{ width: `${frame ? Math.round(gate * 100) : 0}%` }} />
+            <span style={{ width: `${frame ? Math.min(100, Math.round(score * 100)) : 0}%` }} />
           </div>
         </div>
 
         <div>
           <dt className="text-[12px] text-[var(--text-2)]">Result</dt>
           <dd className="text-[14px] mt-0.5 font-medium">
-            {!frame ? "—" : frame.simulated ? "Model not loaded" : passed ? "Crow call" : "Not a crow"}
+            {!frame ? "—" : passed ? "Crow call" : "No crow call"}
           </dd>
         </div>
 
         <div>
-          <dt className="text-[12px] text-[var(--text-2)]">Closest species</dt>
-          <dd className="text-[14px] mt-0.5 truncate" title={frame?.birdnet.topSpecies}>
-            {frame?.birdnet.topSpecies ? (
-              <>
-                {shortSpecies(frame.birdnet.topSpecies)}{" "}
-                <span className="text-[var(--text-3)] mono text-[12px]">
-                  {pct(frame.birdnet.topSpeciesConfidence)}
-                </span>
-              </>
+          <dt className="text-[12px] text-[var(--text-2)]">Closest matches</dt>
+          <dd className="mt-0.5 space-y-0.5">
+            {top3.length > 0 ? (
+              top3.map((r) => (
+                <div key={r.label} className="flex items-baseline justify-between gap-2 text-[13px]">
+                  <span className="truncate">{mapClassToBehavior(r.label).title}</span>
+                  <span className="text-[var(--text-3)] mono text-[12px]">{pct(r.p)}</span>
+                </div>
+              ))
             ) : (
-              "—"
+              <span className="text-[14px]">—</span>
             )}
           </dd>
         </div>

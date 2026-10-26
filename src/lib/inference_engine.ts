@@ -1,17 +1,13 @@
 // ============================================================
 // Inference engine: main-thread proxy to the CrowTrans worker
 // ============================================================
-// Model: /models/crow_behavior.tflite
-// Labels: /models/crow_behavior_labels.txt (6,539 classes)
+// Model: /models/crowtrans_v1b.tflite (contract in src/lib/crow_labels.ts)
 //
-// Input tensor: [1, 144000] float32 (3 seconds @ 48,000 Hz)
-// Output tensor: [1, 6539] float32 RAW LOGITS (no sigmoid in the graph):
-//   indices 0..6521    = BirdNET V2.4 base species (Corvus corone_Carrion Crow = 1579)
-//   indices 6522..6538 = 17 custom "Corvus corone_<behavior>" classes (appended head)
-// Stage 1 gate = sigmoid(base logit) >= that species' own threshold:
-//   Corvus corone (Carrion Crow)  >= CARRION_CROW_THRESHOLD (the target species)
-//   Corvus cornix (Hooded Crow)   >= HOODED_CROW_THRESHOLD
-// Stage 2 = argmax over the 17 custom classes, only when Stage 1 passes.
+// Input tensor:  [1, 144000] float32 (3 seconds @ 48,000 Hz)
+// Output tensor: [1, 7] float32 RAW LOGITS (the worker applies flatSigmoid)
+// Rule: a crow call is present when the strongest class reaches
+// CROW_PRESENCE_THRESHOLD, and that class is the meaning. There is no species
+// gate and no second stage.
 //
 // All of that runs in src/workers/inference.worker.ts. This file only owns the
 // worker lifecycle and the request/response plumbing, so the UI thread never
@@ -20,13 +16,7 @@
 import type { InferenceResult } from "@/types";
 import type { WorkerRequest, WorkerResponse } from "@/workers/inference.worker";
 
-export {
-  CARRION_CROW_THRESHOLD,
-  HOODED_CROW_THRESHOLD,
-  GATE_SPECIES,
-  flatSigmoid,
-  mapCrowLabelToBehavior,
-} from "./crow_labels";
+export { CROW_PRESENCE_THRESHOLD, decide, mapClassToBehavior } from "./crow_labels";
 
 type ProgressFn = (progress: number, status: string) => void;
 
@@ -84,7 +74,7 @@ export class InferenceEngine {
 
   /**
    * Spin up the worker and load the model. Safe to call repeatedly: the same
-   * promise is returned, so the 60 MB model is fetched once per page load.
+   * promise is returned, so the 29 MB model is fetched once per page load.
    */
   async initialize(onProgress?: ProgressFn): Promise<void> {
     if (typeof window === "undefined") return;
@@ -118,8 +108,8 @@ export class InferenceEngine {
             this.ready = true;
             this.activeBackend = msg.backend;
             console.log(
-              `[InferenceEngine] worker ready: labels=${msg.labelCount} ` +
-                `gate=(${msg.gateLabels.join(" | ")}) backend=${msg.backend}`
+              `[InferenceEngine] worker ready: classes=(${msg.classes.join(", ")}) ` +
+                `backend=${msg.backend}`
             );
             onProgress?.(1, `Model ready · ${msg.backend}`);
             resolve();
@@ -128,7 +118,7 @@ export class InferenceEngine {
           case "init-error":
             this.ready = false;
             this.activeBackend = "failed";
-            onProgress?.(1, "crow_behavior.tflite failed to load");
+            onProgress?.(1, "CrowTrans model failed to load");
             reject(new Error(msg.message));
             break;
 

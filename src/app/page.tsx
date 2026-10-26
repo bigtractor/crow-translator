@@ -14,7 +14,7 @@ import { useAudioCapture } from "@/hooks/useAudioCapture";
 import { useDebouncer } from "@/hooks/useDebouncer";
 import { useSessionLog, type LogEntry } from "@/hooks/useSessionLog";
 import { getInferenceEngine, type InferenceEngine } from "@/lib/inference_engine";
-import { GATE_SPECIES, evaluateGate, findGateSpecies } from "@/lib/crow_labels";
+import { decide, mapClassToBehavior } from "@/lib/crow_labels";
 import { BEHAVIOR_TITLES, type InferenceResult, type TranslationEvent } from "@/types";
 
 declare global {
@@ -23,11 +23,12 @@ declare global {
     __crowtrans?: {
       engine: InferenceEngine;
       run: (samples: Float32Array) => Promise<InferenceResult | null>;
-      gate: {
-        GATE_SPECIES: typeof GATE_SPECIES;
-        evaluateGate: typeof evaluateGate;
-        findGateSpecies: typeof findGateSpecies;
+      rules: {
+        decide: typeof decide;
+        mapClassToBehavior: typeof mapClassToBehavior;
       };
+      /** Feed a result straight into the log, bypassing audio and the model. */
+      feed: (result: InferenceResult) => void;
     };
   }
 }
@@ -50,11 +51,14 @@ export default function Home() {
   /** Windows dropped because inference had not finished. */
   const skippedRef = useRef(0);
 
+  /** Stable handle to the ingest function, for the dev hook below. */
+  const processInferenceRef = useRef<(r: InferenceResult) => void>(() => {});
+
   const { events, processInference, clearHistory } = useDebouncer({
     silenceWindowMs: 10000,
     onEventUpdate: (event: TranslationEvent) => {
       if (
-        (event.behavior === "alarm_distress" || event.behavior === "mobbing_call") &&
+        event.behavior === "alarm_agonistic" &&
         event.consecutiveCount === 1 &&
         typeof navigator !== "undefined" &&
         "vibrate" in navigator
@@ -90,17 +94,12 @@ export default function Home() {
         setLatestFrame(result);
         processInference(result);
 
-        if (!result.birdnet.isCrow) {
-          const top = result.birdnet.topSpecies
-            ? `closest: ${result.birdnet.topSpecies.split("_").pop()} ${Math.round(
-                (result.birdnet.topSpeciesConfidence ?? 0) * 100
-              )}%`
+        if (!result.detection.isCrow) {
+          const best = result.behaviorTop?.[0];
+          const detail = best
+            ? `best match: ${mapClassToBehavior(best.label).title} ${Math.round(best.p * 100)}%`
             : undefined;
-          logRejected(
-            result.simulated ? "Model not loaded" : "Below crow threshold",
-            top,
-            result.birdnet.confidence
-          );
+          logRejected("No crow call", detail, result.detection.score);
         }
       } catch (err) {
         console.error("Inference failed:", err);
@@ -136,6 +135,10 @@ export default function Home() {
   }, [audioState.isCapturing, startCapture, stopCapture, logSystem]);
 
   useEffect(() => {
+    processInferenceRef.current = processInference;
+  }, [processInference]);
+
+  useEffect(() => {
     if (audioState.error) {
       logSystem("Microphone error", audioState.error);
     }
@@ -155,12 +158,12 @@ export default function Home() {
           setEngineStatus(loaded ? "ready" : "fallback");
           setBackend(engine.backend);
           setEngineStatusText(
-            loaded ? `Model ready · ${engine.backend}` : "crow_behavior.tflite failed to load"
+            loaded ? `Model ready · ${engine.backend}` : "CrowTrans model failed to load"
           );
           logSystem(
             loaded ? "Model loaded" : "Model unavailable",
             loaded
-              ? "crow_behavior.tflite · BirdNET V2.4 + 17 behaviour classes"
+              ? "crowtrans_v1b.tflite · BirdNET V2.4 features + 7 call classes"
               : "Detections are disabled until the model loads. Check the browser console."
           );
         }
@@ -176,7 +179,8 @@ export default function Home() {
       window.__crowtrans = {
         engine,
         run: (s) => engine.runInference(s),
-        gate: { GATE_SPECIES, evaluateGate, findGateSpecies },
+        rules: { decide, mapClassToBehavior },
+        feed: (r) => processInferenceRef.current(r),
       };
     }
 

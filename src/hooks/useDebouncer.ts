@@ -122,10 +122,10 @@ export function useDebouncer({
    */
   const processInference = useCallback(
     (result: InferenceResult) => {
-      const { birdnet, behavior, behaviorConfidence } = result;
+      const { detection, behavior, behaviorConfidence } = result;
 
-      // Gatekeeper check: If Stage 1 discarded tensor (not a crow or < 0.70 confidence)
-      if (!birdnet.isCrow || !behavior) {
+      // No crow call in this window, so there is nothing to log
+      if (!detection.isCrow || !behavior) {
         // We received non-crow or silence.
         // We do NOT immediately reset; we let the 10-second silence window tick down!
         return;
@@ -134,9 +134,19 @@ export function useDebouncer({
       const now = Date.now();
       const current = activeEventRef.current;
 
-      // Check if this classification is identical to the currently active event
-      if (current && current.behavior === behavior && current.active) {
-        // Consecutive identical behavior!
+      // Aggregate only windows carrying the SAME meaning.
+      //
+      // Keyed on rawLabel (the model class), not the coarser `behavior`. With
+      // the previous 17-class model several classes shared one category, and
+      // because a merge spreads the existing event it kept the FIRST window's
+      // title, so a run of calls showed one frozen label while the model's
+      // answer changed. Keying on the class means a change of meaning always
+      // starts a new log entry, whatever the category mapping does later.
+      const sameMeaning =
+        current && current.active && (current.rawLabel ?? current.behavior) === (result.rawLabel ?? behavior);
+
+      if (current && sameMeaning) {
+        // Consecutive identical meaning!
         // Increment consecutive count and duration timer
         const updatedDurationSec = Math.max(
           3,
