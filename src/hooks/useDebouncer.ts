@@ -7,7 +7,7 @@
 // incrementing a duration timer. A 10-second silence window resets the state."
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import type { CrowBehavior, InferenceResult, TranslationEvent } from "@/types";
+import type { InferenceResult, TranslationEvent } from "@/types";
 
 interface UseDebouncerOptions {
   /** Silence window in milliseconds before resetting continuous event (default: 10,000ms = 10s) */

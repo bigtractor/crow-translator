@@ -1,0 +1,121 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --background: #080c0a;
+    --foreground: #f0fdf4;
+  }
+
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    background-color: #080c0a;
+    color: #f0fdf4;
+    font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    overscroll-behavior-y: none;
+  }
+}
+
+/* iOS Safe Area Padding Utilities */
+.pb-safe {
+  padding-bottom: max(1.25rem, env(safe-area-inset-bottom, 20px));
+}
+
+.pt-safe {
+  padding-top: max(0.75rem, env(safe-area-inset-top, 12px));
+}
+
+/* Custom Sleek Scrollbar */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(16, 185, 129, 0.2);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(16, 185, 129, 0.4);
+}
+
+/* Pulsing Organic Glow Animations */
+@keyframes ring-pulse {
+  0% {
+    transform: scale(0.95);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0.2;
+  }
+  100% {
+    transform: scale(0.95);
+    opacity: 0.7;
+  }
+}
+
+@keyframes ripple-wave {
+  0% {
+    transform: scale(0.9);
+    opacity: 0.8;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+
+@keyframes breathe-slow {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 35px -5px rgba(16, 185, 129, 0.35);
+  }
+  50% {
+    transform: scale(1.03);
+    box-shadow: 0 0 55px 0px rgba(16, 185, 129, 0.6);
+  }
+}
+
+@keyframes live-dot {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.85);
+  }
+}
+
+.animate-ring-pulse {
+  animation: ring-pulse 2.4s ease-in-out infinite;
+}
+
+.animate-ripple-wave {
+  animation: ripple-wave 2s cubic-bezier(0, 0.2, 0.8, 1) infinite;
+}
+
+.animate-breathe {
+  animation: breathe-slow 2.8s ease-in-out infinite;
+}
+
+.animate-live-dot {
+  animation: live-dot 1.4s ease-in-out infinite;
+}
+
+/* Soft Radial Backdrop Gradients */
+.bg-radial-glow {
+  background: radial-gradient(circle at 50% 20%, rgba(16, 185, 129, 0.08) 0%, transparent 70%);
+}
+
+.bg-radial-ambient {
+  background: radial-gradient(circle at 50% 90%, rgba(5, 150, 105, 0.12) 0%, transparent 60%);
+}

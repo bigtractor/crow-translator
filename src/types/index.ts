@@ -22,6 +22,10 @@ export interface BirdNETResult {
   speciesIndex: number;
   /** Whether this was identified as Corvus corone */
   isCrow: boolean;
+  /** Highest-scoring base BirdNET species in this frame (diagnostic) */
+  topSpecies?: string;
+  /** Sigmoid confidence of topSpecies (diagnostic) */
+  topSpeciesConfidence?: number;
 }
 
 /** Behavioral classification from Stage 2 */
@@ -191,6 +195,8 @@ export interface InferenceResult {
   customTitle?: string;
   /** Custom human biological meaning */
   customMeaning?: string;
+  /** True when produced by the DSP heuristic fallback, not the TFLite model */
+  simulated?: boolean;
 }
 
 /** A debounced event in the live feed */

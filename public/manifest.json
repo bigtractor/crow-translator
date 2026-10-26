@@ -1,12 +1,12 @@
 {
-  "name": "Corvus-Edge — Bioacoustic Inference Node",
-  "short_name": "Corvus-Edge",
-  "description": "Real-time Corvus corone vocalization detection and behavioral translation via client-side WebAssembly ML inference.",
+  "name": "CrowTrans",
+  "short_name": "CrowTrans",
+  "description": "On-device Carrion Crow (Corvus corone) call recognition and translation log.",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#05080c",
-  "theme_color": "#10b981",
+  "background_color": "#f5f5f7",
+  "theme_color": "#f5f5f7",
   "icons": [
     {
       "src": "/favicon.ico",

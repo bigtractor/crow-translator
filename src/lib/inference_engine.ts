@@ -4,7 +4,11 @@
 // Labels: /models/crow_behavior_labels.txt (6,539 classes)
 // ============================================================
 // Input tensor: [1, 144000] float32 (3 seconds @ 48,000 Hz)
-// Output tensor: [1, 6539] float32 probabilities
+// Output tensor: [1, 6539] float32 RAW LOGITS (no sigmoid in the graph):
+//   indices 0..6521    = BirdNET V2.4 base species (Corvus corone_Carrion Crow = 1579)
+//   indices 6522..6538 = 17 custom "Corvus corone_<behavior>" classes (appended head)
+// Stage 1 gate = sigmoid(base Carrion/Hooded Crow logit) >= CROW_CONFIDENCE_THRESHOLD.
+// Stage 2 = argmax over the 17 custom classes, only when Stage 1 passes.
 // Memory Leak Prevention: All tensors are strictly tracked and disposed
 // via tf.dispose() after every single inference cycle.
 
@@ -21,6 +25,26 @@ interface TFLiteModel {
 
 /** Confidence threshold for crow detection (Stage 1 gatekeeper) */
 export const CROW_CONFIDENCE_THRESHOLD = 0.70;
+
+/**
+ * Base-model species that count as "a crow" for the Stage 1 gate.
+ * Carrion Crow and Hooded Crow are one superspecies with near-identical calls,
+ * and BirdNET frequently splits its confidence between the two, so both are
+ * accepted. Matched as case-insensitive prefixes against the label list.
+ */
+export const GATE_SPECIES_PREFIXES = [
+  "corvus corone_carrion crow",
+  "corvus cornix_hooded crow",
+];
+
+/**
+ * BirdNET's output layer has no activation: values are logits. BirdNET-Analyzer
+ * applies flat_sigmoid(x, sensitivity=1) = 1 / (1 + exp(-clip(x, -15, 15))).
+ */
+export function flatSigmoid(logit: number, sensitivity = 1.0): number {
+  const x = Math.max(-15, Math.min(15, logit));
+  return 1 / (1 + Math.exp(-sensitivity * x));
+}
 
 /** Expected input shape: 3 seconds at 48kHz = 144,000 samples */
 const EXPECTED_SAMPLES = 48000 * 3; // 144,000
@@ -169,6 +193,8 @@ export class InferenceEngine {
   private tf: typeof import("@tensorflow/tfjs") | null = null;
   private speciesLabels: string[] = [];
   private crowSpeciesIndex: number = -1;
+  /** All base-model indices accepted by the Stage 1 gate (see GATE_SPECIES_PREFIXES) */
+  private gateIndices: number[] = [];
   private behaviorIndices: number[] = [];
   private isWasmLoaded: boolean = false;
   private activeBackend: string = "uninitialized";
@@ -222,48 +248,72 @@ export class InferenceEngine {
             .map((l) => l.trim())
             .filter(Boolean);
 
-          // Find generic Corvus corone index (line 1580, index 1579)
-          this.crowSpeciesIndex = this.speciesLabels.findIndex((l) =>
-            l.toLowerCase().startsWith("corvus corone_carrion crow")
-          );
-
-          if (this.crowSpeciesIndex === -1) {
-            this.crowSpeciesIndex = this.speciesLabels.findIndex((l) =>
-              l.toLowerCase().includes("corvus corone")
+          // Stage 1 gate species: base-model Carrion Crow (line 1580, index 1579)
+          // plus Hooded Crow. Prefix match so "Corvus corone_Carrion Crow" is found
+          // regardless of case.
+          this.gateIndices = [];
+          for (const prefix of GATE_SPECIES_PREFIXES) {
+            const idx = this.speciesLabels.findIndex((l) =>
+              l.toLowerCase().startsWith(prefix)
             );
+            if (idx !== -1) this.gateIndices.push(idx);
           }
+          this.crowSpeciesIndex = this.gateIndices[0] ?? -1;
 
-          // Extract all custom Corvus corone behavior indices (lines 6523 to 6539)
+          // Stage 2 classes: every "Corvus corone_<behavior>" label that is NOT the
+          // base species entry (these are the 17 appended custom classes, 6522..6538).
           this.behaviorIndices = [];
           this.speciesLabels.forEach((label, idx) => {
             const lower = label.toLowerCase();
             if (
               lower.startsWith("corvus corone_") &&
-              idx !== this.crowSpeciesIndex
+              !lower.startsWith("corvus corone_carrion crow")
             ) {
               this.behaviorIndices.push(idx);
             }
           });
+
+          console.log(
+            `[InferenceEngine] labels=${this.speciesLabels.length} ` +
+              `gateIndices=${JSON.stringify(this.gateIndices)} ` +
+              `(${this.gateIndices.map((i) => this.speciesLabels[i]).join(" | ")}) ` +
+              `behaviorClasses=${this.behaviorIndices.length}`
+          );
         }
       } catch (err) {
         console.warn("Could not load /models/crow_behavior_labels.txt:", err);
       }
 
-      if (this.crowSpeciesIndex === -1) {
+      if (this.gateIndices.length === 0) {
+        // Hard fallback to the known BirdNET V2.4 index of Corvus corone_Carrion Crow
         this.crowSpeciesIndex = 1579;
+        this.gateIndices = [1579];
       }
 
       onProgress?.(0.6, "Loading real TFLite model: crow_behavior.tflite...");
 
       // 3. Load crow_behavior.tflite via WebAssembly
       try {
-        const importTflite = new Function('return import("@tensorflow/tfjs-tflite")');
-        const tflite = await importTflite();
+        // A real dynamic import so webpack bundles the package. (The previous
+        // `new Function('return import(...)')` ran a native browser import of a
+        // bare specifier, which always failed, so the model never loaded and the
+        // app silently ran the DSP heuristic instead.) The UMD build is used
+        // because the package's ESM entry references a file it does not ship.
+        const tflite = await import("@tensorflow/tfjs-tflite/dist/tf-tflite.min.js");
+        // Serve the TFLite WASM runtime from our own origin (COEP: require-corp
+        // blocks cross-origin assets without CORP headers).
+        tflite.setWasmPath("/tflite/");
         this.isWasmLoaded = true;
 
         this.behaviorModel = (await tflite.loadTFLiteModel(
           "/models/crow_behavior.tflite"
         )) as unknown as TFLiteModel;
+
+        // NOTE: do not run a warm-up inference here. The threaded WASM runtime
+        // deadlocks the main thread if invoked before its worker pool is up
+        // ("Blocking on the main thread is very dangerous"). The first real
+        // window arrives >= 3 s after the user starts the microphone, and
+        // runTflitePipeline discards any saturated (garbage) frame anyway.
 
         onProgress?.(1.0, "Real Model Loaded (crow_behavior.tflite)");
       } catch (tfliteErr) {
@@ -322,36 +372,81 @@ export class InferenceEngine {
       outputTensor = this.behaviorModel!.predict(inputTensor);
       const probs = (await outputTensor.data()) as Float32Array;
 
-      // 3. Look up generic Carrion Crow probability
-      let genericCrowProb = 0;
-      if (this.crowSpeciesIndex >= 0 && this.crowSpeciesIndex < probs.length) {
-        genericCrowProb = probs[this.crowSpeciesIndex] || 0;
+      // probs holds RAW LOGITS from the concat of [base 6522 | custom 17].
+      const logits = probs;
+      if (this.speciesLabels.length > 0 && logits.length !== this.speciesLabels.length) {
+        console.warn(
+          `[InferenceEngine] output length ${logits.length} != labels ${this.speciesLabels.length}; label indices may be misaligned`
+        );
       }
 
-      // 4. Look up specific crow behaviors across the custom behavior classes
-      let maxBehaviorProb = 0;
-      let topBehaviorLabel = "";
+      // Sanity guard against a saturated / invalid output (seen on the very first
+      // run after load): a real window never has dozens of species above 0.99.
+      let saturated = 0;
+      for (let i = 0; i < logits.length; i++) {
+        if (logits[i] > 5) saturated++;
+        if (saturated > 25) break;
+      }
+      if (saturated > 25) {
+        console.warn(`[InferenceEngine] discarding invalid frame: ${saturated}+ classes saturated`);
+        return {
+          timestamp: Date.now(),
+          birdnet: {
+            species: "Invalid frame (model output saturated)",
+            confidence: 0,
+            speciesIndex: this.crowSpeciesIndex,
+            isCrow: false,
+          },
+          behavior: null,
+          behaviorConfidence: null,
+          processingTimeMs: Math.round(performance.now() - startTime),
+        };
+      }
 
-      for (const idx of this.behaviorIndices) {
-        const p = probs[idx] || 0;
-        if (p > maxBehaviorProb) {
-          maxBehaviorProb = p;
-          topBehaviorLabel = this.speciesLabels[idx] || "";
+      // ---------------- STAGE 1: species gate (base BirdNET classes only) --------------
+      let stage1Score = 0;
+      let stage1Index = this.crowSpeciesIndex;
+      for (const idx of this.gateIndices) {
+        if (idx < 0 || idx >= logits.length) continue;
+        const p = flatSigmoid(logits[idx]);
+        if (p > stage1Score) {
+          stage1Score = p;
+          stage1Index = idx;
+        }
+      }
+      const isCrow = stage1Score >= CROW_CONFIDENCE_THRESHOLD;
+
+      // Top base-model species overall, for diagnostics (what did BirdNET think it was?)
+      let topBaseIdx = -1;
+      let topBaseLogit = -Infinity;
+      const baseCount = logits.length - this.behaviorIndices.length;
+      for (let i = 0; i < baseCount; i++) {
+        if (logits[i] > topBaseLogit) {
+          topBaseLogit = logits[i];
+          topBaseIdx = i;
         }
       }
 
-      // Overall crow detection confidence: either generic Corvus corone or specific behavior
-      const combinedConfidence = Math.max(genericCrowProb, maxBehaviorProb);
-      const isCrow = combinedConfidence >= CROW_CONFIDENCE_THRESHOLD;
+      console.log(
+        `Stage 1 (Corvus corone) confidence: ${stage1Score.toFixed(3)} ` +
+          `[${this.speciesLabels[stage1Index] ?? stage1Index}] -> ${isCrow ? "PASS" : "DROP"}` +
+          (topBaseIdx >= 0
+            ? ` | top base species: ${this.speciesLabels[topBaseIdx] ?? topBaseIdx} (${flatSigmoid(topBaseLogit).toFixed(3)})`
+            : "")
+      );
 
       const birdnetResult: BirdNETResult = {
-        species: isCrow ? "Corvus corone_Carrion Crow" : "Background / Non-Target",
-        confidence: combinedConfidence,
-        speciesIndex: this.crowSpeciesIndex,
+        species: isCrow
+          ? this.speciesLabels[stage1Index] ?? "Corvus corone_Carrion Crow"
+          : "Background / Non-Target",
+        confidence: stage1Score,
+        speciesIndex: stage1Index,
         isCrow,
+        topSpecies: topBaseIdx >= 0 ? this.speciesLabels[topBaseIdx] : undefined,
+        topSpeciesConfidence: topBaseIdx >= 0 ? flatSigmoid(topBaseLogit) : undefined,
       };
 
-      // Gatekeeper check: If confidence < 0.70, discard tensor & return
+      // Gatekeeper: below threshold -> drop the frame, never run Stage 2.
       if (!isCrow) {
         return {
           timestamp: Date.now(),
@@ -362,16 +457,31 @@ export class InferenceEngine {
         };
       }
 
-      // 5. Translate behavior
+      // ---------------- STAGE 2: behavior (custom appended classes only) --------------
+      let maxBehaviorProb = 0;
+      let topBehaviorLabel = "";
+      for (const idx of this.behaviorIndices) {
+        if (idx < 0 || idx >= logits.length) continue;
+        const p = flatSigmoid(logits[idx]);
+        if (p > maxBehaviorProb) {
+          maxBehaviorProb = p;
+          topBehaviorLabel = this.speciesLabels[idx] || "";
+        }
+      }
+
       const labelToUse =
         topBehaviorLabel || "Corvus corone_general short vocalization";
       const { behavior, title, meaning } = mapCrowLabelToBehavior(labelToUse);
+
+      console.log(
+        `Stage 2 behavior: ${labelToUse} (${maxBehaviorProb.toFixed(3)}) -> ${title}`
+      );
 
       return {
         timestamp: Date.now(),
         birdnet: birdnetResult,
         behavior,
-        behaviorConfidence: maxBehaviorProb || genericCrowProb,
+        behaviorConfidence: maxBehaviorProb,
         processingTimeMs: Math.round(performance.now() - startTime),
         rawLabel: labelToUse,
         customTitle: title,
@@ -476,10 +586,13 @@ export class InferenceEngine {
       };
     }
 
-    // Crow detected! Gatekeeper confidence >= 0.70
+    // Heuristic only: the real model is NOT loaded. Never report this as a crow.
     const crowConfidence = Math.min(
       0.98,
       0.74 + (peak > 0.15 ? 0.16 : 0.06) + Math.random() * 0.08
+    );
+    console.warn(
+      "[InferenceEngine] crow_behavior.tflite not loaded; DSP heuristic matched a burst but is NOT a crow detection."
     );
 
     let rawLabel = "Corvus corone_general short vocalization";
@@ -502,22 +615,24 @@ export class InferenceEngine {
       behaviorConfidence = 0.80;
     }
 
-    const { behavior, title, meaning } = mapCrowLabelToBehavior(rawLabel);
+    const { title, meaning } = mapCrowLabelToBehavior(rawLabel);
+    void behaviorConfidence;
 
     return {
       timestamp: Date.now(),
       birdnet: {
-        species: "Corvus corone_Carrion Crow",
+        species: "SIMULATED (model not loaded) / burst heuristic",
         confidence: Math.round(crowConfidence * 100) / 100,
         speciesIndex: this.crowSpeciesIndex,
-        isCrow: true,
+        isCrow: false,
       },
-      behavior,
-      behaviorConfidence: Math.round(behaviorConfidence * 100) / 100,
+      behavior: null,
+      behaviorConfidence: null,
       processingTimeMs: Math.round(performance.now() - startTime),
       rawLabel,
-      customTitle: title,
+      customTitle: title + " (simulated)",
       customMeaning: meaning,
+      simulated: true,
     };
   }
 

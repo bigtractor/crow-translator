@@ -49,8 +49,8 @@ export function useAudioCapture({
   const bufferIndexRef = useRef<number>(0);
 
   // Frequency and time-domain arrays for canvas visualizers
-  const frequencyDataRef = useRef<Uint8Array | null>(null);
-  const timeDomainDataRef = useRef<Uint8Array | null>(null);
+  const frequencyDataRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
+  const timeDomainDataRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
 
   // Animation frame reference for level metering
   const meterRafRef = useRef<number | null>(null);
@@ -160,7 +160,7 @@ export function useAudioCapture({
         if (!analyserNodeRef.current) return;
 
         if (timeDomainDataRef.current) {
-          analyserNodeRef.current.getByteTimeDomainData(timeDomainDataRef.current as any);
+          analyserNodeRef.current.getByteTimeDomainData(timeDomainDataRef.current);
           let sumSquares = 0;
           for (let i = 0; i < timeDomainDataRef.current.length; i++) {
             const norm = (timeDomainDataRef.current[i] - 128) / 128;
@@ -242,10 +242,10 @@ export function useAudioCapture({
     if (!analyserNodeRef.current) return null;
 
     if (frequencyDataRef.current) {
-      analyserNodeRef.current.getByteFrequencyData(frequencyDataRef.current as any);
+      analyserNodeRef.current.getByteFrequencyData(frequencyDataRef.current);
     }
     if (timeDomainDataRef.current) {
-      analyserNodeRef.current.getByteTimeDomainData(timeDomainDataRef.current as any);
+      analyserNodeRef.current.getByteTimeDomainData(timeDomainDataRef.current);
     }
 
     return {

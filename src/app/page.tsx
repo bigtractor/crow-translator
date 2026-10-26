@@ -1,91 +1,91 @@
 // ============================================================
-// Calcaine: Real-Time Corvus corone Bioacoustic Intelligence
-// Full Web Application Design (State-of-the-Art AI UI)
+// CrowTrans: on-device Carrion Crow call recognition
 // ============================================================
 
 "use client";
 
-import React, { useState, useEffect, useCallback, useRef } from "react";
-import confetti from "canvas-confetti";
-import { FullAppHeader } from "@/components/FullAppHeader";
-import { HeroAudioConsole } from "@/components/HeroAudioConsole";
-import { InteractiveSoundboard } from "@/components/InteractiveSoundboard";
-import { TranslationFeedView } from "@/components/TranslationFeedView";
-import { TaxonomyModal } from "@/components/TaxonomyModal";
-import { PrivacyModal } from "@/components/PrivacyModal";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { BrandHeader, type EngineStatus } from "@/components/BrandHeader";
+import { ListenPanel } from "@/components/ListenPanel";
+import { CurrentFrame } from "@/components/CurrentFrame";
+import { OutputLog } from "@/components/OutputLog";
+import { InfoFooter } from "@/components/InfoFooter";
 import { useAudioCapture } from "@/hooks/useAudioCapture";
 import { useDebouncer } from "@/hooks/useDebouncer";
-import { getInferenceEngine } from "@/lib/inference_engine";
-import type { TranslationEvent } from "@/types";
+import { useSessionLog, type LogEntry } from "@/hooks/useSessionLog";
+import { getInferenceEngine, type InferenceEngine } from "@/lib/inference_engine";
+import { BEHAVIOR_TITLES, type InferenceResult, type TranslationEvent } from "@/types";
+
+declare global {
+  interface Window {
+    /** Development-only handle for driving the engine from the console. */
+    __crowtrans?: { engine: InferenceEngine; run: (samples: Float32Array) => Promise<InferenceResult> };
+  }
+}
+
+function shortLabel(raw?: string): string | undefined {
+  if (!raw) return undefined;
+  return raw.replace(/^Corvus corone_\s*/i, "").trim();
+}
 
 export default function Home() {
-  const [engineReady, setEngineReady] = useState(false);
-  const [activeBackend, setActiveBackend] = useState("WASM / WebGL");
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [isTaxonomyOpen, setIsTaxonomyOpen] = useState(false);
-  const [isPrivacyOpen, setIsPrivacyOpen] = useState(false);
+  const [engineStatus, setEngineStatus] = useState<EngineStatus>("loading");
+  const [engineStatusText, setEngineStatusText] = useState("Preparing model…");
+  const [backend, setBackend] = useState("—");
+  const [processing, setProcessing] = useState(false);
+  const [latestFrame, setLatestFrame] = useState<InferenceResult | null>(null);
 
-  const soundboardRef = useRef<HTMLDivElement | null>(null);
-  const hasCelebratedFirstCrowRef = useRef(false);
+  const { entries: logEntries, system: logSystem, rejected: logRejected, clear: logClear } =
+    useSessionLog();
 
-  // Debouncer hook for consecutive behavior aggregation
-  const {
-    events,
-    activeEvent,
-    silenceCountdownMs,
-    processInference,
-    clearHistory,
-  } = useDebouncer({
+  const { events, processInference, clearHistory } = useDebouncer({
     silenceWindowMs: 10000,
     onEventUpdate: (event: TranslationEvent) => {
-      // Haptic feedback for urgent alarms on mobile
       if (
-        (event.behavior === "alarm_distress" ||
-          event.behavior === "mobbing_call") &&
-        event.consecutiveCount === 1
+        (event.behavior === "alarm_distress" || event.behavior === "mobbing_call") &&
+        event.consecutiveCount === 1 &&
+        typeof navigator !== "undefined" &&
+        "vibrate" in navigator
       ) {
-        if (typeof window !== "undefined" && "vibrate" in navigator) {
-          try {
-            navigator.vibrate([100, 50, 100]);
-          } catch {}
-        }
+        try {
+          navigator.vibrate([80, 40, 80]);
+        } catch {}
       }
     },
   });
 
-  // Handle incoming 3-second audio slices
+  // Each 3-second window from the microphone
   const handleSegmentReady = useCallback(
     async (samples: Float32Array) => {
-      setIsProcessing(true);
+      setProcessing(true);
       try {
         const engine = getInferenceEngine();
         const result = await engine.runInference(samples);
-
-        // Process through debouncer (silently filters non-crows)
+        setLatestFrame(result);
         processInference(result);
 
-        // Confetti celebration on first crow discovery
-        if (result.birdnet.isCrow && !hasCelebratedFirstCrowRef.current) {
-          hasCelebratedFirstCrowRef.current = true;
-          try {
-            confetti({
-              particleCount: 50,
-              spread: 70,
-              origin: { y: 0.7 },
-              colors: ["#10b981", "#06b6d4", "#f59e0b"],
-            });
-          } catch {}
+        if (!result.birdnet.isCrow) {
+          const top = result.birdnet.topSpecies
+            ? `closest: ${result.birdnet.topSpecies.split("_").pop()} ${Math.round(
+                (result.birdnet.topSpeciesConfidence ?? 0) * 100
+              )}%`
+            : undefined;
+          logRejected(
+            result.simulated ? "Model not loaded" : "Below crow threshold",
+            top,
+            result.birdnet.confidence
+          );
         }
       } catch (err) {
-        console.error("Audio inference notice:", err);
+        console.error("Inference failed:", err);
+        logSystem("Inference error", err instanceof Error ? err.message : String(err));
       } finally {
-        setIsProcessing(false);
+        setProcessing(false);
       }
     },
-    [processInference]
+    [processInference, logRejected, logSystem]
   );
 
-  // Web Audio capture hook (48.0 kHz iOS Safari compliant)
   const {
     state: audioState,
     inputLevelDb,
@@ -93,104 +93,117 @@ export default function Home() {
     startCapture,
     stopCapture,
     resumeAudioContext,
-    getAudioVisualData,
-    injectSyntheticAudio,
   } = useAudioCapture({
     sampleRate: 48000,
     segmentDurationSec: 3,
     onSegmentReady: handleSegmentReady,
   });
 
-  // Toggle listening state
-  const handleToggleCapture = useCallback(() => {
+  const toggleListening = useCallback(() => {
     if (audioState.isCapturing) {
       stopCapture();
+      logSystem("Stopped listening");
     } else {
+      logSystem("Started listening", "48 kHz · 3 s windows");
       startCapture();
     }
-  }, [audioState.isCapturing, startCapture, stopCapture]);
+  }, [audioState.isCapturing, startCapture, stopCapture, logSystem]);
 
-  // Initialize engine and load crow_behavior.tflite
+  useEffect(() => {
+    if (audioState.error) {
+      logSystem("Microphone error", audioState.error);
+    }
+  }, [audioState.error, logSystem]);
+
+  // Load the model once
   useEffect(() => {
     const engine = getInferenceEngine();
+    let cancelled = false;
+
     engine
-      .initialize((progress) => {
-        if (progress >= 1.0) {
-          setEngineReady(true);
-          setActiveBackend(engine.backend || "WASM / WebGL");
+      .initialize((progress, status) => {
+        if (cancelled) return;
+        setEngineStatusText(status);
+        if (progress >= 1) {
+          const loaded = engine.usingTflite;
+          setEngineStatus(loaded ? "ready" : "fallback");
+          setBackend(engine.backend);
+          setEngineStatusText(
+            loaded ? `Model ready · ${engine.backend}` : "crow_behavior.tflite failed to load"
+          );
+          logSystem(
+            loaded ? "Model loaded" : "Model unavailable",
+            loaded
+              ? "crow_behavior.tflite · BirdNET V2.4 + 17 behaviour classes"
+              : "Detections are disabled until the model loads. Check the browser console."
+          );
         }
       })
       .catch((err) => {
-        console.warn("Inference engine notice:", err);
-        setEngineReady(true);
+        if (cancelled) return;
+        setEngineStatus("fallback");
+        setEngineStatusText("Model failed to initialise");
+        logSystem("Model failed to initialise", err instanceof Error ? err.message : String(err));
       });
 
+    if (process.env.NODE_ENV === "development") {
+      window.__crowtrans = { engine, run: (s) => engine.runInference(s) };
+    }
+
     return () => {
+      cancelled = true;
       engine.dispose();
+      if (process.env.NODE_ENV === "development") delete window.__crowtrans;
     };
-  }, []);
+  }, [logSystem]);
+
+  // Merge continuous detections (from the debouncer) with system / rejected entries
+  const entries = useMemo<LogEntry[]>(() => {
+    const detections: LogEntry[] = events.map((e) => ({
+      id: e.id,
+      time: e.startTime,
+      kind: "detection",
+      title: e.customTitle ?? BEHAVIOR_TITLES[e.behavior],
+      detail: shortLabel(e.rawLabel),
+      confidence: e.confidence,
+      durationSec: e.durationSec,
+      count: e.consecutiveCount,
+      active: e.active,
+    }));
+    return [...detections, ...logEntries].sort((a, b) => b.time - a.time);
+  }, [events, logEntries]);
+
+  const clearAll = useCallback(() => {
+    clearHistory();
+    logClear();
+  }, [clearHistory, logClear]);
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#050907] text-zinc-100 selection:bg-emerald-500 selection:text-black bg-radial-glow overflow-x-hidden">
-      {/* High-End AI App Header */}
-      <FullAppHeader
-        isCapturing={audioState.isCapturing}
-        isProcessing={isProcessing}
-        activeBackend={activeBackend}
-        onOpenTaxonomy={() => setIsTaxonomyOpen(true)}
-        onOpenPrivacy={() => setIsPrivacyOpen(true)}
-        onOpenSoundboard={() => {
-          soundboardRef.current?.scrollIntoView({ behavior: "smooth" });
-        }}
-      />
+    <div className="min-h-dvh flex flex-col">
+      <BrandHeader engineStatus={engineStatus} listening={audioState.isCapturing} />
 
-      {/* Main Content Container */}
-      <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 pt-6 pb-12 flex flex-col items-center">
-        {/* Hero Section: Interactive Reactor Hub + Bioacoustic Spectrum */}
-        <HeroAudioConsole
-          isCapturing={audioState.isCapturing}
-          isProcessing={isProcessing}
-          isAudioContextSuspended={isAudioContextSuspended}
-          inputLevelDb={inputLevelDb}
-          onToggleCapture={handleToggleCapture}
-          onResumeAudioContext={resumeAudioContext}
-          getAudioVisualData={getAudioVisualData}
-        />
-
-        {/* Bioacoustic Soundboard Strip */}
-        <div ref={soundboardRef} className="w-full">
-          <InteractiveSoundboard
-            onTriggerSample={(type) => {
-              injectSyntheticAudio(type);
-            }}
-            isProcessing={isProcessing}
+      <main className="mx-auto w-full max-w-[1200px] px-4 sm:px-6 pt-3 flex-1 lg:grid lg:grid-cols-[400px_minmax(0,1fr)] lg:gap-6 lg:items-start">
+        <div className="flex flex-col gap-4 lg:sticky lg:top-4">
+          <ListenPanel
+            engineStatus={engineStatus}
+            engineStatusText={engineStatusText}
+            listening={audioState.isCapturing}
+            processing={processing}
+            levelDb={inputLevelDb}
+            suspended={isAudioContextSuspended}
+            error={audioState.error}
+            onToggle={toggleListening}
+            onResume={resumeAudioContext}
           />
+          <CurrentFrame frame={latestFrame} listening={audioState.isCapturing} />
         </div>
 
-        {/* Live Translation Timeline Feed */}
-        <TranslationFeedView
-          events={events}
-          activeEvent={activeEvent}
-          silenceCountdownMs={silenceCountdownMs}
-          isCapturing={audioState.isCapturing}
-          onClearHistory={clearHistory}
-        />
+        <div className="mt-4 lg:mt-0">
+          <OutputLog entries={entries} onClear={clearAll} />
+        </div>
       </main>
 
-      {/* Behavioral Taxonomy Modal */}
-      <TaxonomyModal
-        isOpen={isTaxonomyOpen}
-        onClose={() => setIsTaxonomyOpen(false)}
-        onSelectSample={(type) => {
-          injectSyntheticAudio(type);
-        }}
-      />
-
-      {/* Privacy & Architecture Modal */}
-      <PrivacyModal
-        isOpen={isPrivacyOpen}
-        onClose={() => setIsPrivacyOpen(false)}
-      />
+      <InfoFooter backend={backend} modelLoaded={engineStatus === "ready"} />
     </div>
   );
 }
