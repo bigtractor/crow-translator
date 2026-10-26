@@ -10,18 +10,37 @@
 
 import type { CrowBehavior } from "@/types";
 
-/** Confidence threshold for crow detection (Stage 1 gatekeeper) */
-export const CROW_CONFIDENCE_THRESHOLD = 0.70;
+/**
+ * Confidence a Corvus corone (Carrion Crow) match must reach for the window to
+ * count as a crow. This is the target species, so the bar is deliberately low:
+ * a 30% Carrion Crow match is accepted as a crow.
+ */
+export const CARRION_CROW_THRESHOLD = 0.30;
 
 /**
- * Base-model species that count as "a crow" for the Stage 1 gate.
- * Carrion Crow and Hooded Crow are one superspecies with near-identical calls,
- * and BirdNET frequently splits its confidence between the two, so both are
- * accepted. Matched as case-insensitive prefixes against the label list.
+ * Corvus cornix (Hooded Crow) is a near-identical sister species that BirdNET
+ * often splits confidence with, so it is kept as a second route through the
+ * gate. It carries the stricter bar: only a confident Hooded Crow match counts
+ * on its own.
  */
-export const GATE_SPECIES_PREFIXES = [
-  "corvus corone_carrion crow",
-  "corvus cornix_hooded crow",
+export const HOODED_CROW_THRESHOLD = 0.70;
+
+/** A base-model species that can open the Stage 1 gate, with its own bar. */
+export interface GateSpecies {
+  /** Lowercase prefix matched against the label list. */
+  prefix: string;
+  /** Sigmoid confidence this species must reach on its own. */
+  threshold: number;
+}
+
+/**
+ * Species that count as "a crow" for the Stage 1 gate, each with its own
+ * threshold. The FIRST entry is the target species: it is the one the UI shows
+ * a figure for when nothing passes.
+ */
+export const GATE_SPECIES: GateSpecies[] = [
+  { prefix: "corvus corone_carrion crow", threshold: CARRION_CROW_THRESHOLD },
+  { prefix: "corvus cornix_hooded crow", threshold: HOODED_CROW_THRESHOLD },
 ];
 
 /** Known BirdNET V2.4 index of Corvus corone_Carrion Crow, used only as a fallback */
@@ -36,14 +55,78 @@ export function flatSigmoid(logit: number, sensitivity = 1.0): number {
   return 1 / (1 + Math.exp(-sensitivity * x));
 }
 
-/** Base-model indices accepted by the Stage 1 gate. */
-export function findGateIndices(labels: string[]): number[] {
-  const found: number[] = [];
-  for (const prefix of GATE_SPECIES_PREFIXES) {
-    const idx = labels.findIndex((l) => l.toLowerCase().startsWith(prefix));
-    if (idx !== -1) found.push(idx);
+/** A gate species resolved against the loaded label list. */
+export interface GateEntry {
+  index: number;
+  threshold: number;
+  label: string;
+}
+
+/**
+ * Resolve GATE_SPECIES against the label list, preserving order so the first
+ * entry remains the target species.
+ */
+export function findGateSpecies(labels: string[]): GateEntry[] {
+  const found: GateEntry[] = [];
+  for (const species of GATE_SPECIES) {
+    const index = labels.findIndex((l) => l.toLowerCase().startsWith(species.prefix));
+    if (index !== -1) {
+      found.push({ index, threshold: species.threshold, label: labels[index] });
+    }
   }
   return found;
+}
+
+/** Outcome of the Stage 1 species gate. */
+export interface GateDecision {
+  /** True when some gate species reached its own threshold. */
+  isCrow: boolean;
+  /** Species to report: whichever opened the gate, else the target species. */
+  index: number;
+  /** That species' sigmoid confidence. */
+  score: number;
+}
+
+/**
+ * Stage 1: does this window contain a crow?
+ *
+ * Every gate species is judged against its OWN threshold, so Corvus corone
+ * passes at 30% while Corvus cornix still needs 70%. The window passes if any
+ * one of them clears its bar.
+ *
+ * Priority follows GATE_SPECIES order rather than raw score: the FIRST species
+ * to clear its own bar wins. Corvus corone is listed first, so a Carrion Crow
+ * at or above its threshold is reported as a Carrion Crow even when the
+ * Hooded Crow class happens to score higher.
+ *
+ * When nothing clears its bar, the target species is reported so the figure
+ * shown in the UI matches the bar displayed beside it.
+ */
+export function evaluateGate(
+  logits: ArrayLike<number>,
+  gate: GateEntry[],
+  primaryIndex: number
+): GateDecision {
+  let passIndex = -1;
+  let passScore = 0;
+  let primaryScore = 0;
+
+  for (const g of gate) {
+    if (g.index < 0 || g.index >= logits.length) continue;
+    const p = flatSigmoid(logits[g.index]);
+    if (g.index === primaryIndex) primaryScore = p;
+    if (passIndex === -1 && p >= g.threshold) {
+      passIndex = g.index;
+      passScore = p;
+    }
+  }
+
+  const isCrow = passIndex !== -1;
+  return {
+    isCrow,
+    index: isCrow ? passIndex : primaryIndex,
+    score: isCrow ? passScore : primaryScore,
+  };
 }
 
 /**

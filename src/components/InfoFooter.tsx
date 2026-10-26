@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { CROW_CONFIDENCE_THRESHOLD } from "@/lib/inference_engine";
+import { CARRION_CROW_THRESHOLD, HOODED_CROW_THRESHOLD } from "@/lib/inference_engine";
 
 interface InfoFooterProps {
   backend: string;
@@ -22,8 +22,10 @@ export function InfoFooter({ backend, modelLoaded }: InfoFooterProps) {
         </div>
         <div>
           <div className="text-[var(--text-3)] uppercase tracking-[0.08em] text-[10px] mb-1">Method</div>
-          Each 3-second window must score at least {Math.round(CROW_CONFIDENCE_THRESHOLD * 100)}% for
-          Carrion or Hooded Crow before a meaning is assigned.
+          Each 3-second window must score at least{" "}
+          {Math.round(CARRION_CROW_THRESHOLD * 100)}% for Carrion Crow, or{" "}
+          {Math.round(HOODED_CROW_THRESHOLD * 100)}% for the near-identical Hooded Crow, before a
+          meaning is assigned.
         </div>
         <div>
           <div className="text-[var(--text-3)] uppercase tracking-[0.08em] text-[10px] mb-1">Privacy</div>

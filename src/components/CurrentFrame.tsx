@@ -2,7 +2,7 @@
 
 import React from "react";
 import type { InferenceResult } from "@/types";
-import { CROW_CONFIDENCE_THRESHOLD } from "@/lib/inference_engine";
+import { CARRION_CROW_THRESHOLD } from "@/lib/inference_engine";
 
 interface CurrentFrameProps {
   frame: InferenceResult | null;
@@ -27,7 +27,8 @@ function shortSpecies(label?: string): string {
 export function CurrentFrame({ frame, listening }: CurrentFrameProps) {
   const gate = frame?.birdnet.confidence ?? 0;
   const passed = !!frame?.birdnet.isCrow;
-  const threshold = Math.round(CROW_CONFIDENCE_THRESHOLD * 100);
+  // The bar shown is the target species' bar; see GATE_SPECIES.
+  const threshold = Math.round(CARRION_CROW_THRESHOLD * 100);
 
   return (
     <section className="glass p-5 sm:p-6" aria-labelledby="frame-heading">

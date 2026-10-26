@@ -15,12 +15,14 @@
 
 import type { InferenceResult, BirdNETResult } from "@/types";
 import {
-  CROW_CONFIDENCE_THRESHOLD,
+  CARRION_CROW_THRESHOLD,
   FALLBACK_CROW_INDEX,
   findBehaviorIndices,
-  findGateIndices,
+  findGateSpecies,
   flatSigmoid,
+  evaluateGate,
   mapCrowLabelToBehavior,
+  type GateEntry,
 } from "../lib/crow_labels";
 
 /** 3 seconds at 48 kHz */
@@ -48,8 +50,9 @@ export type WorkerResponse =
 let tf: typeof import("@tensorflow/tfjs-core") | null = null;
 let model: TFLiteModel | null = null;
 let labels: string[] = [];
-let gateIndices: number[] = [];
+let gateSpecies: GateEntry[] = [];
 let behaviorIndices: number[] = [];
+/** Index of the target species, Corvus corone. */
 let crowIndex = FALLBACK_CROW_INDEX;
 let initPromise: Promise<void> | null = null;
 
@@ -70,13 +73,19 @@ async function loadLabels() {
     .map((l) => l.trim())
     .filter(Boolean);
 
-  gateIndices = findGateIndices(labels);
+  gateSpecies = findGateSpecies(labels);
   behaviorIndices = findBehaviorIndices(labels);
 
-  if (gateIndices.length === 0) {
-    gateIndices = [FALLBACK_CROW_INDEX];
+  if (gateSpecies.length === 0) {
+    gateSpecies = [
+      {
+        index: FALLBACK_CROW_INDEX,
+        threshold: CARRION_CROW_THRESHOLD,
+        label: "Corvus corone_Carrion Crow",
+      },
+    ];
   }
-  crowIndex = gateIndices[0];
+  crowIndex = gateSpecies[0].index;
 }
 
 async function init() {
@@ -140,7 +149,7 @@ async function init() {
     type: "ready",
     backend: core.getBackend(),
     labelCount: labels.length,
-    gateLabels: gateIndices.map((i) => labels[i] ?? `#${i}`),
+    gateLabels: gateSpecies.map((g) => `${g.label} @ ${Math.round(g.threshold * 100)}%`),
   });
 }
 
@@ -193,17 +202,11 @@ function runInference(samples: Float32Array): InferenceResult {
     }
 
     // ---------------- STAGE 1: species gate (base BirdNET classes only) -----------
-    let stage1Score = 0;
-    let stage1Index = crowIndex;
-    for (const idx of gateIndices) {
-      if (idx < 0 || idx >= logits.length) continue;
-      const p = flatSigmoid(logits[idx]);
-      if (p > stage1Score) {
-        stage1Score = p;
-        stage1Index = idx;
-      }
-    }
-    const isCrow = stage1Score >= CROW_CONFIDENCE_THRESHOLD;
+    // Per-species thresholds; see evaluateGate in lib/crow_labels.
+    const gate = evaluateGate(logits, gateSpecies, crowIndex);
+    const isCrow = gate.isCrow;
+    const stage1Index = gate.index;
+    const stage1Score = gate.score;
 
     // Top base-model species overall, for diagnostics.
     let topBaseIdx = -1;
@@ -217,8 +220,15 @@ function runInference(samples: Float32Array): InferenceResult {
     }
 
     console.log(
-      `Stage 1 (Corvus corone) confidence: ${stage1Score.toFixed(3)} ` +
-        `[${labels[stage1Index] ?? stage1Index}] -> ${isCrow ? "PASS" : "DROP"}` +
+      `Stage 1: ${labels[stage1Index] ?? stage1Index} ${stage1Score.toFixed(3)} -> ` +
+        `${isCrow ? "PASS" : "DROP"} | gate: ` +
+        gateSpecies
+          .map(
+            (g) =>
+              `${(labels[g.index] ?? `#${g.index}`).split("_")[0]} ` +
+              `${flatSigmoid(logits[g.index] ?? -15).toFixed(3)}/${g.threshold.toFixed(2)}`
+          )
+          .join(", ") +
         (topBaseIdx >= 0
           ? ` | top base species: ${labels[topBaseIdx] ?? topBaseIdx} (${flatSigmoid(topBaseLogit).toFixed(3)})`
           : "")

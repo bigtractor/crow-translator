@@ -14,6 +14,7 @@ import { useAudioCapture } from "@/hooks/useAudioCapture";
 import { useDebouncer } from "@/hooks/useDebouncer";
 import { useSessionLog, type LogEntry } from "@/hooks/useSessionLog";
 import { getInferenceEngine, type InferenceEngine } from "@/lib/inference_engine";
+import { GATE_SPECIES, evaluateGate, findGateSpecies } from "@/lib/crow_labels";
 import { BEHAVIOR_TITLES, type InferenceResult, type TranslationEvent } from "@/types";
 
 declare global {
@@ -22,6 +23,11 @@ declare global {
     __crowtrans?: {
       engine: InferenceEngine;
       run: (samples: Float32Array) => Promise<InferenceResult | null>;
+      gate: {
+        GATE_SPECIES: typeof GATE_SPECIES;
+        evaluateGate: typeof evaluateGate;
+        findGateSpecies: typeof findGateSpecies;
+      };
     };
   }
 }
@@ -167,7 +173,11 @@ export default function Home() {
       });
 
     if (process.env.NODE_ENV === "development") {
-      window.__crowtrans = { engine, run: (s) => engine.runInference(s) };
+      window.__crowtrans = {
+        engine,
+        run: (s) => engine.runInference(s),
+        gate: { GATE_SPECIES, evaluateGate, findGateSpecies },
+      };
     }
 
     return () => {

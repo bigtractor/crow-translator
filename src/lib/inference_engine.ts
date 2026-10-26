@@ -8,7 +8,9 @@
 // Output tensor: [1, 6539] float32 RAW LOGITS (no sigmoid in the graph):
 //   indices 0..6521    = BirdNET V2.4 base species (Corvus corone_Carrion Crow = 1579)
 //   indices 6522..6538 = 17 custom "Corvus corone_<behavior>" classes (appended head)
-// Stage 1 gate = sigmoid(base Carrion/Hooded Crow logit) >= CROW_CONFIDENCE_THRESHOLD.
+// Stage 1 gate = sigmoid(base logit) >= that species' own threshold:
+//   Corvus corone (Carrion Crow)  >= CARRION_CROW_THRESHOLD (the target species)
+//   Corvus cornix (Hooded Crow)   >= HOODED_CROW_THRESHOLD
 // Stage 2 = argmax over the 17 custom classes, only when Stage 1 passes.
 //
 // All of that runs in src/workers/inference.worker.ts. This file only owns the
@@ -19,8 +21,9 @@ import type { InferenceResult } from "@/types";
 import type { WorkerRequest, WorkerResponse } from "@/workers/inference.worker";
 
 export {
-  CROW_CONFIDENCE_THRESHOLD,
-  GATE_SPECIES_PREFIXES,
+  CARRION_CROW_THRESHOLD,
+  HOODED_CROW_THRESHOLD,
+  GATE_SPECIES,
   flatSigmoid,
   mapCrowLabelToBehavior,
 } from "./crow_labels";
