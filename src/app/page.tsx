@@ -4,7 +4,7 @@
 
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BrandHeader, type EngineStatus } from "@/components/BrandHeader";
 import { ListenPanel } from "@/components/ListenPanel";
 import { CurrentFrame } from "@/components/CurrentFrame";
@@ -19,7 +19,10 @@ import { BEHAVIOR_TITLES, type InferenceResult, type TranslationEvent } from "@/
 declare global {
   interface Window {
     /** Development-only handle for driving the engine from the console. */
-    __crowtrans?: { engine: InferenceEngine; run: (samples: Float32Array) => Promise<InferenceResult> };
+    __crowtrans?: {
+      engine: InferenceEngine;
+      run: (samples: Float32Array) => Promise<InferenceResult | null>;
+    };
   }
 }
 
@@ -37,6 +40,9 @@ export default function Home() {
 
   const { entries: logEntries, system: logSystem, rejected: logRejected, clear: logClear } =
     useSessionLog();
+
+  /** Windows dropped because inference had not finished. */
+  const skippedRef = useRef(0);
 
   const { events, processInference, clearHistory } = useDebouncer({
     silenceWindowMs: 10000,
@@ -61,6 +67,20 @@ export default function Home() {
       try {
         const engine = getInferenceEngine();
         const result = await engine.runInference(samples);
+
+        // null means the previous window was still being analysed, so this one
+        // was dropped rather than queued. Say so once, then stay quiet.
+        if (!result) {
+          skippedRef.current += 1;
+          if (skippedRef.current === 1) {
+            logSystem(
+              "Window skipped",
+              "Analysis did not finish before the next 3 s window. Readings may be intermittent on this device."
+            );
+          }
+          return;
+        }
+
         setLatestFrame(result);
         processInference(result);
 
@@ -152,7 +172,9 @@ export default function Home() {
 
     return () => {
       cancelled = true;
-      engine.dispose();
+      // Deliberately not disposing: the engine is a process-lifetime singleton
+      // and tearing down the worker would re-download the 60 MB model on the
+      // next mount.
       if (process.env.NODE_ENV === "development") delete window.__crowtrans;
     };
   }, [logSystem]);

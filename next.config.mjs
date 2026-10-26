@@ -2,7 +2,10 @@
 const nextConfig = {
   reactStrictMode: false,
 
-  // Required for SharedArrayBuffer (WASM threading) and serving .tflite/.wasm models
+  // Cross-origin isolation (enables SharedArrayBuffer) plus correct binary
+  // headers for .tflite/.wasm. Note that the inference worker explicitly opts
+  // OUT of the multi-threaded TFLite runtime regardless of these headers; see
+  // src/workers/inference.worker.ts.
   async headers() {
     return [
       {
