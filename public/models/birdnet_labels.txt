@@ -1,0 +1,50 @@
+Corvus corone_Carrion Crow
+Corvus frugilegus_Rook
+Corvus monedula_Western Jackdaw
+Corvus corax_Common Raven
+Pica pica_Eurasian Magpie
+Garrulus glandarius_Eurasian Jay
+Turdus merula_Eurasian Blackbird
+Turdus philomelos_Song Thrush
+Erithacus rubecula_European Robin
+Parus major_Great Tit
+Cyanistes caeruleus_Eurasian Blue Tit
+Passer domesticus_House Sparrow
+Passer montanus_Eurasian Tree Sparrow
+Columba livia_Rock Pigeon
+Columba palumbus_Common Wood Pigeon
+Streptopelia decaocto_Eurasian Collared Dove
+Sturnus vulgaris_Common Starling
+Fringilla coelebs_Common Chaffinch
+Chloris chloris_European Greenfinch
+Carduelis carduelis_European Goldfinch
+Hirundo rustica_Barn Swallow
+Apus apus_Common Swift
+Motacilla alba_White Wagtail
+Troglodytes troglodytes_Eurasian Wren
+Phylloscopus collybita_Common Chiffchaff
+Sylvia atricapilla_Eurasian Blackcap
+Aegithalos caudatus_Long-tailed Tit
+Sitta europaea_Eurasian Nuthatch
+Certhia brachydactyla_Short-toed Treecreeper
+Buteo buteo_Common Buzzard
+Falco tinnunculus_Common Kestrel
+Accipiter nisus_Eurasian Sparrowhawk
+Tyto alba_Barn Owl
+Strix aluco_Tawny Owl
+Athene noctua_Little Owl
+Larus argentatus_European Herring Gull
+Larus ridibundus_Black-headed Gull
+Anas platyrhynchos_Mallard
+Cygnus olor_Mute Swan
+Ardea cinerea_Grey Heron
+Phasianus colchicus_Ring-necked Pheasant
+Alauda arvensis_Eurasian Skylark
+Anthus pratensis_Meadow Pipit
+Emberiza citrinella_Yellowhammer
+Emberiza calandra_Corn Bunting
+Carduelis cannabina_Common Linnet
+Prunella modularis_Dunnock
+Phoenicurus ochruros_Black Redstart
+Lanius collurio_Red-backed Shrike
+Oriolus oriolus_Eurasian Golden Oriole

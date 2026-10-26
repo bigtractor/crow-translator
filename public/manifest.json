@@ -1,0 +1,17 @@
+{
+  "name": "Corvus-Edge — Bioacoustic Inference Node",
+  "short_name": "Corvus-Edge",
+  "description": "Real-time Corvus corone vocalization detection and behavioral translation via client-side WebAssembly ML inference.",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#05080c",
+  "theme_color": "#10b981",
+  "icons": [
+    {
+      "src": "/favicon.ico",
+      "sizes": "any",
+      "type": "image/x-icon"
+    }
+  ]
+}
