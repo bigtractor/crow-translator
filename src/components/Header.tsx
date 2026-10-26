@@ -1,96 +1,95 @@
 // ============================================================
-// Header Component
-// Bioacoustic Edge Node Cybernetic Header & Telemetry Bar
+// Calcaine: Minimalist Brand Header & Ambient Status Pill
 // ============================================================
 
 "use client";
 
 import React from "react";
-import { Cpu, Wifi, Shield, Settings2, Sparkles } from "lucide-react";
+import { Sparkles, ShieldCheck } from "lucide-react";
 
 interface HeaderProps {
-  backend: string;
   isCapturing: boolean;
-  onOpenDiagnostics: () => void;
-  sharedArrayBufferSupported: boolean;
+  isProcessing: boolean;
+  onOpenDemo?: () => void;
 }
 
-export const Header: React.FC<HeaderProps> = ({
-  backend,
-  isCapturing,
-  onOpenDiagnostics,
-  sharedArrayBufferSupported,
-}) => {
+export function Header({ isCapturing, isProcessing, onOpenDemo }: HeaderProps) {
   return (
-    <header className="border-b border-emerald-500/20 bg-[#070b10]/90 backdrop-blur-md sticky top-0 z-40">
-      <div className="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-        {/* Node Branding */}
-        <div className="flex items-center gap-3">
-          <div className="relative flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500/20 via-teal-500/10 to-cyan-500/20 border border-emerald-500/40 text-emerald-400 shadow-lg shadow-emerald-950/40">
-            <span className="text-xl">🦅</span>
+    <header className="sticky top-0 z-30 w-full backdrop-blur-xl bg-[#080c0a]/85 border-b border-emerald-950/40 transition-colors">
+      <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
+        {/* Brand identity */}
+        <div className="flex items-center gap-2.5">
+          <div className="relative flex items-center justify-center w-8 h-8 rounded-xl bg-gradient-to-br from-emerald-500/20 to-emerald-950/40 border border-emerald-500/30 text-emerald-400 shadow-inner">
+            {/* Custom stylized feather/raven icon */}
+            <svg
+              className="w-4 h-4 fill-current"
+              viewBox="0 0 24 24"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path d="M21.71 2.29a1 1 0 0 0-1.05-.24c-2.45.86-5.87 2.47-8.73 4.88-3.05 2.58-4.93 5.48-4.93 8.07 0 1.25.43 2.37 1.24 3.24.84.9 2.01 1.41 3.26 1.41 2.59 0 5.49-1.88 8.07-4.93 2.41-2.86 4.02-6.28 4.88-8.73a1 1 0 0 0-.24-1.05l-2.5-2.65zm-7.9 14.5c-.75 0-1.42-.29-1.88-.79-.43-.46-.68-1.08-.68-1.75 0-1.85 1.55-4.14 4.06-6.38 1.48-1.32 3.09-2.39 4.67-3.15-.76 1.58-1.83 3.19-3.15 4.67-2.24 2.51-4.53 4.06-6.38 4.06zM3 21h4c.55 0 1-.45 1-1s-.45-1-1-1H4.41l4.3-4.29a1 1 0 1 0-1.42-1.42L3 18.59V15c0-.55-.45-1-1-1s-1 .45-1 1v5c0 .55.45 1 1 1z" />
+            </svg>
+            {isCapturing && (
+              <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+            )}
           </div>
-
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-sm sm:text-base font-bold font-mono tracking-tight text-white flex items-center gap-1.5">
-                CORVUS-EDGE
-                <span className="text-emerald-400 font-normal">//</span>
-                <span className="text-zinc-300 font-normal text-xs sm:text-sm">
-                  ACOUSTIC INFERENCE NODE
-                </span>
-              </h1>
-              <span className="hidden sm:inline-flex rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-mono font-semibold text-emerald-400 border border-emerald-500/30">
-                PROTOTYPE v1.0
+            <div className="flex items-center gap-1.5">
+              <span className="font-semibold text-base tracking-tight text-white">
+                Calcaine
+              </span>
+              <span className="text-[10px] uppercase font-bold tracking-wider px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                Beta
               </span>
             </div>
-            <p className="text-[11px] text-zinc-400 font-sans">
-              Real-time Corvus corone translation via Client-Side WebAssembly & BirdNET
+            <p className="text-[11px] text-zinc-400 leading-none">
+              Corvus corone bioacoustics
             </p>
           </div>
         </div>
 
-        {/* Telemetry Status Cluster */}
+        {/* Right Action / Status Pill */}
         <div className="flex items-center gap-2">
-          {/* Vercel Edge Badge */}
-          <div className="hidden md:flex items-center gap-1.5 rounded-lg bg-zinc-900/80 px-2.5 py-1 text-[11px] font-mono text-zinc-300 border border-zinc-800">
-            <Wifi className="h-3.5 w-3.5 text-cyan-400" />
-            <span>Vercel Edge CDN</span>
-          </div>
-
-          {/* Backend / WASM indicator */}
-          <div className="hidden sm:flex items-center gap-1.5 rounded-lg bg-zinc-900/80 px-2.5 py-1 text-[11px] font-mono text-zinc-300 border border-zinc-800">
-            <Cpu className="h-3.5 w-3.5 text-emerald-400" />
-            <span>{backend.toUpperCase()}</span>
-          </div>
-
-          {/* Sensor Pulse */}
+          {/* Live Audio State Pill */}
           <div
-            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[11px] font-mono border ${
-              isCapturing
-                ? "bg-emerald-950/80 border-emerald-500/50 text-emerald-300"
-                : "bg-zinc-900/80 border-zinc-800 text-zinc-500"
+            className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-all duration-300 ${
+              isProcessing
+                ? "bg-amber-500/15 border-amber-500/30 text-amber-300"
+                : isCapturing
+                ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300 shadow-[0_0_12px_-2px_rgba(16,185,129,0.3)]"
+                : "bg-zinc-900/60 border-zinc-800 text-zinc-400"
             }`}
           >
             <span
-              className={`h-2 w-2 rounded-full ${
-                isCapturing ? "bg-emerald-400 animate-pulse" : "bg-zinc-600"
+              className={`w-1.5 h-1.5 rounded-full ${
+                isProcessing
+                  ? "bg-amber-400 animate-pulse"
+                  : isCapturing
+                  ? "bg-emerald-400 animate-live-dot"
+                  : "bg-zinc-500"
               }`}
             />
-            <span className="hidden xs:inline">
-              {isCapturing ? "LIVE (48kHz)" : "STANDBY"}
+            <span className="text-[11px] tracking-wide">
+              {isProcessing
+                ? "Translating..."
+                : isCapturing
+                ? "Listening"
+                : "Ready"}
             </span>
           </div>
 
-          {/* System Diagnostics Trigger */}
-          <button
-            onClick={onOpenDiagnostics}
-            className="flex items-center gap-1.5 rounded-lg bg-emerald-950/40 hover:bg-emerald-900/60 px-3 py-1 text-xs font-mono text-emerald-300 border border-emerald-700/50 transition-colors"
-          >
-            <Settings2 className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">Architecture</span>
-          </button>
+          {/* Quick Demo Button for users without real crows */}
+          {onOpenDemo && (
+            <button
+              onClick={onOpenDemo}
+              aria-label="Test with sample crow vocalization"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-950/40 hover:bg-emerald-900/40 active:scale-95 text-emerald-300 border border-emerald-800/40 transition-all cursor-pointer"
+            >
+              <Sparkles className="w-3 h-3 text-emerald-400" />
+              <span>Demo</span>
+            </button>
+          )}
         </div>
       </div>
     </header>
   );
-};
+}

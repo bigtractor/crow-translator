@@ -13,17 +13,17 @@ const robotoMono = Roboto_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Corvus-Edge | Real-Time Bioacoustic Acoustic Inference Node",
+  title: "Calcaine | Real-Time Crow Bioacoustic Translation",
   description:
-    "Simulating a physical bioacoustic edge node for real-time Corvus corone detection and behavioral translation using BirdNET and WebAssembly client-side inference on Vercel.",
+    "Real-time bioacoustic translation for Carrion Crows (Corvus corone). Client-side neural translation powered by Web Audio API and WebAssembly.",
   keywords: [
+    "Calcaine",
+    "Crow Translator",
+    "Corvus corone",
     "Bioacoustics",
     "BirdNET",
-    "Corvus corone",
-    "TensorFlow.js",
-    "WebAssembly",
+    "Animal Communication",
     "Edge AI",
-    "Vercel",
   ],
 };
 
@@ -41,10 +41,11 @@ export default function RootLayout({
         <link rel="manifest" href="/manifest.json" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        <meta name="apple-mobile-web-app-title" content="Corvus-Edge" />
-        <meta name="theme-color" content="#10b981" />
+        <meta name="apple-mobile-web-app-title" content="Calcaine" />
+        <meta name="theme-color" content="#080c0a" />
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
       </head>
-      <body className="min-h-full bg-[#05080c] text-zinc-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-black">
+      <body className="min-h-full bg-[#080c0a] text-zinc-100 flex flex-col font-sans selection:bg-emerald-500 selection:text-black">
         {children}
       </body>
     </html>
