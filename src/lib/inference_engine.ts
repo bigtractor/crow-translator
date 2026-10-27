@@ -1,7 +1,7 @@
 // ============================================================
 // Inference engine: main-thread proxy to the CrowTrans worker
 // ============================================================
-// Model: /models/crowtrans_v1b.tflite (contract in src/lib/crow_labels.ts)
+// Model: /models/crowtrans_v2.tflite (contract in src/lib/crow_labels.ts)
 //
 // Input tensor:  [1, 144000] float32 (3 seconds @ 48,000 Hz)
 // Output tensor: [1, 7] float32 RAW LOGITS (the worker applies flatSigmoid)

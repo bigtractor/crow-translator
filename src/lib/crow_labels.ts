@@ -3,29 +3,31 @@
 // ============================================================
 // Pure functions, no DOM or TensorFlow dependency.
 //
-// Model: /models/crowtrans_v1b.tflite (BirdNET V2.4 features + a custom head)
+// Model: /models/crowtrans_v2.tflite (BirdNET V2.4 features + a custom head)
 //   input   float32 [1, 144000]  3 s of mono audio at 48 kHz
 //   output  float32 [1, 7]       RAW LOGITS (range roughly -30..+6). The graph has
 //                                no final sigmoid; flatSigmoid() below turns them
 //                                into probabilities, as BirdNET-Analyzer does.
-// Output order follows /models/crowtrans_v1b_labels.txt. "Background" is not an
+// Output order follows /models/crowtrans_v2_labels.txt. "Background" is not an
 // output: it is trained as "none of the classes", so a non-crow sound shows up
 // as every class being low.
 
 import type { CrowBehavior } from "@/types";
 
-export const MODEL_URL = "/models/crowtrans_v1b.tflite";
-export const LABELS_URL = "/models/crowtrans_v1b_labels.txt";
+export const MODEL_URL = "/models/crowtrans_v2.tflite";
+export const LABELS_URL = "/models/crowtrans_v2_labels.txt";
 
 /**
  * A window counts as a crow call when its strongest class reaches this
  * probability (after flatSigmoid). Measured on held-out recordings the model
- * never trained on: 89% of crow windows pass, 1.9% of background windows pass,
- * and 0 of 25 claps/knocks/footsteps/clicks pass; the winning class is the
- * right one 81% of the time. Raise it for fewer false alarms (0.50: 79% / 0.8%),
- * lower it for more detections (0.30: 96% / 2.7%).
+ * never trained on: 96% of crow/raven/rook/jackdaw windows pass, 2.3% of 649
+ * background windows pass, and 0 of 52 claps/knocks/footsteps/clicks pass; the
+ * winning class is the right one 73% of the time (flight calls are over half
+ * the data, so this is a weak yardstick). Set to 30% because background noise
+ * pulls the score down, so anything that still reaches 30% is very often a
+ * real call. Raise it for fewer false alarms.
  */
-export const CROW_PRESENCE_THRESHOLD = 0.4;
+export const CROW_PRESENCE_THRESHOLD = 0.3;
 
 /**
  * The model's output layer has no activation: values are logits.

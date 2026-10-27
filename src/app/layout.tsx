@@ -17,9 +17,9 @@ const robotoMono = Roboto_Mono({
 export const metadata: Metadata = {
   title: "CrowTrans",
   description:
-    "CrowTrans recognises Carrion Crow (Corvus corone) calls on-device and logs what each call most likely means. Audio never leaves the browser.",
+    "CrowTrans recognises crow, raven, rook and jackdaw calls on-device and logs what each call most likely means. Audio never leaves the browser.",
   applicationName: "CrowTrans",
-  keywords: ["CrowTrans", "Corvus corone", "Carrion Crow", "bioacoustics", "BirdNET"],
+  keywords: ["CrowTrans", "crow", "raven", "corvid", "bioacoustics", "BirdNET"],
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,

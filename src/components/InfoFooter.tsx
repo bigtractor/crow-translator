@@ -15,9 +15,9 @@ export function InfoFooter({ backend, modelLoaded }: InfoFooterProps) {
         <div>
           <div className="text-[var(--text-3)] uppercase tracking-[0.08em] text-[10px] mb-1">Model</div>
           BirdNET V2.4 audio features with a CrowTrans head: 7 call types, trained on
-          Carrion and Hooded Crow recordings plus everyday background sound.
+          Carrion, Hooded, American and other crows, ravens, rooks and jackdaws, plus everyday background sound.
           <div className="mt-1 mono text-[11px] text-[var(--text-3)]">
-            {modelLoaded ? "crowtrans_v1b.tflite · " : "not loaded · "}
+            {modelLoaded ? "crowtrans_v2.tflite · " : "not loaded · "}
             {backend}
           </div>
         </div>

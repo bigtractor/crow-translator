@@ -54,7 +54,7 @@ export function BrandHeader({ engineStatus, listening }: BrandHeaderProps) {
             <div className="leading-none">
               <div className="text-[17px] font-semibold tracking-[-0.02em]">CrowTrans</div>
               <div className="text-[11px] text-[var(--text-2)] mt-1 tracking-[0.01em]">
-                Carrion crow call recognition
+                Corvid call recognition
               </div>
             </div>
           </div>

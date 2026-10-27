@@ -1,5 +1,5 @@
 // ============================================================
-// CrowTrans: on-device Carrion Crow call recognition
+// CrowTrans: on-device corvid call recognition
 // ============================================================
 
 "use client";
@@ -163,7 +163,7 @@ export default function Home() {
           logSystem(
             loaded ? "Model loaded" : "Model unavailable",
             loaded
-              ? "crowtrans_v1b.tflite · BirdNET V2.4 features + 7 call classes"
+              ? "crowtrans_v2.tflite · BirdNET V2.4 features + 7 call classes"
               : "Detections are disabled until the model loads. Check the browser console."
           );
         }

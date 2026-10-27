@@ -2,7 +2,7 @@
 // ============================================================
 // CrowTrans inference worker
 // ============================================================
-// Runs crowtrans_v1b.tflite off the main thread.
+// Runs crowtrans_v2.tflite off the main thread.
 //
 // Why a worker: TFLiteModel.predict() is fully synchronous and takes ~300 ms
 // per 3-second window on a desktop (seconds on a phone). On the main thread
