@@ -10,6 +10,7 @@ import { ListenPanel } from "@/components/ListenPanel";
 import { CurrentFrame } from "@/components/CurrentFrame";
 import { OutputLog } from "@/components/OutputLog";
 import { InfoFooter } from "@/components/InfoFooter";
+import { SpeakPanel } from "@/components/SpeakPanel";
 import { useAudioCapture } from "@/hooks/useAudioCapture";
 import { useDebouncer } from "@/hooks/useDebouncer";
 import { useSessionLog, type LogEntry } from "@/hooks/useSessionLog";
@@ -44,6 +45,17 @@ export default function Home() {
   const [backend, setBackend] = useState("—");
   const [processing, setProcessing] = useState(false);
   const [latestFrame, setLatestFrame] = useState<InferenceResult | null>(null);
+  const [view, setView] = useState<"listen" | "speak">("listen");
+
+  /**
+   * Epoch ms until which the app itself is playing a crow call. The microphone
+   * would hear that playback, so windows inside this period are ignored instead
+   * of being logged as detections.
+   */
+  const playbackEndsRef = useRef(0);
+  const onPlayback = useCallback((endsAtMs: number) => {
+    playbackEndsRef.current = endsAtMs;
+  }, []);
 
   const { entries: logEntries, system: logSystem, rejected: logRejected, clear: logClear } =
     useSessionLog();
@@ -73,6 +85,8 @@ export default function Home() {
   // Each 3-second window from the microphone
   const handleSegmentReady = useCallback(
     async (samples: Float32Array) => {
+      // Our own playback is in this window; do not analyse it.
+      if (Date.now() < playbackEndsRef.current + 3500) return;
       setProcessing(true);
       try {
         const engine = getInferenceEngine();
@@ -218,26 +232,56 @@ export default function Home() {
     <div className="min-h-dvh flex flex-col">
       <BrandHeader engineStatus={engineStatus} listening={audioState.isCapturing} />
 
-      <main className="mx-auto w-full max-w-[1200px] px-4 sm:px-6 pt-3 flex-1 lg:grid lg:grid-cols-[400px_minmax(0,1fr)] lg:gap-6 lg:items-start">
-        <div className="flex flex-col gap-4 lg:sticky lg:top-4">
-          <ListenPanel
-            engineStatus={engineStatus}
-            engineStatusText={engineStatusText}
-            listening={audioState.isCapturing}
-            processing={processing}
-            levelDb={inputLevelDb}
-            suspended={isAudioContextSuspended}
-            error={audioState.error}
-            onToggle={toggleListening}
-            onResume={resumeAudioContext}
-          />
-          <CurrentFrame frame={latestFrame} listening={audioState.isCapturing} />
+      <div className="mx-auto w-full max-w-[1200px] px-4 sm:px-6 pt-1">
+        <div className="glass inline-flex gap-1 p-1 rounded-full" role="tablist" aria-label="Mode">
+          {(
+            [
+              ["listen", "Listen"],
+              ["speak", "Speak"],
+            ] as const
+          ).map(([v, label]) => (
+            <button
+              key={v}
+              type="button"
+              role="tab"
+              aria-selected={view === v}
+              onClick={() => setView(v)}
+              className={`pressable focus-ring h-9 px-5 text-[14px] font-medium rounded-full ${
+                view === v ? "btn-primary" : "text-[var(--text-2)]"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
+      </div>
 
-        <div className="mt-4 lg:mt-0">
-          <OutputLog entries={entries} onClear={clearAll} />
-        </div>
-      </main>
+      {view === "listen" ? (
+        <main className="mx-auto w-full max-w-[1200px] px-4 sm:px-6 pt-3 flex-1 lg:grid lg:grid-cols-[400px_minmax(0,1fr)] lg:gap-6 lg:items-start">
+          <div className="flex flex-col gap-4 lg:sticky lg:top-4">
+            <ListenPanel
+              engineStatus={engineStatus}
+              engineStatusText={engineStatusText}
+              listening={audioState.isCapturing}
+              processing={processing}
+              levelDb={inputLevelDb}
+              suspended={isAudioContextSuspended}
+              error={audioState.error}
+              onToggle={toggleListening}
+              onResume={resumeAudioContext}
+            />
+            <CurrentFrame frame={latestFrame} listening={audioState.isCapturing} />
+          </div>
+
+          <div className="mt-4 lg:mt-0">
+            <OutputLog entries={entries} onClear={clearAll} />
+          </div>
+        </main>
+      ) : (
+        <main className="mx-auto w-full max-w-[1200px] px-4 sm:px-6 pt-3 flex-1">
+          <SpeakPanel onPlayback={onPlayback} />
+        </main>
+      )}
 
       <InfoFooter backend={backend} modelLoaded={engineStatus === "ready"} />
     </div>
